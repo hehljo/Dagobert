@@ -283,11 +283,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
                 Abbrechen
               </button>
             </div>
-            <p className="text-ios-gray text-[11px]">
-              {isPasskeySupported()
-                ? 'Passkey fehlgeschlagen oder abgebrochen. Lege stattdessen eine 4-6 stellige PIN fest:'
-                : 'Passkeys benötigen eine sichere Verbindung (HTTPS oder localhost). Bitte lege eine PIN fest:'}
-            </p>
+            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-1 text-amber-700 dark:text-amber-300 text-[11px]">
+              <p className="font-semibold">
+                {isPasskeySupported()
+                  ? 'Passkey abgebrochen'
+                  : 'Hinweis zu Passkeys (WebAuthn):'}
+              </p>
+              <p>
+                {isPasskeySupported()
+                  ? 'Du kannst stattdessen eine 4-6 stellige PIN verwenden.'
+                  : 'Browser erlauben Biometrie / Passkeys aus Sicherheitsgründen nur über verschlüsselte HTTPS-Verbindungen (z. B. Tailscale HTTPS oder Synology Reverse Proxy). Im lokalen HTTP-Netzwerk steht dir die PIN-Sperre zur Verfügung.'}
+              </p>
+            </div>
             <div className="flex space-x-2">
               <input
                 type="password"
@@ -381,7 +388,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
           Dagobert v{APP_VERSION}
         </p>
         <p className="text-[11px]">
-          Build {BUILD_DATE} · Safe-Area &amp; Notch-Fix aktiv
+          Build {BUILD_DATE} · App-Shell, PIN-Fix &amp; Viewport-Lock aktiv
         </p>
       </div>
     </div>

@@ -84,17 +84,19 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-ios-bg dark:bg-ios-darkBg transition-colors">
-      {/* Top Bar */}
-      <Navbar
-        onOpenImport={() => setIsImportOpen(true)}
-        onOpenNewManual={handleOpenNewManual}
-        isDark={isDark}
-        onToggleDark={() => setIsDark(!isDark)}
-      />
+    <div className="h-[100dvh] max-h-[100dvh] w-full flex flex-col overflow-hidden bg-ios-bg dark:bg-ios-darkBg transition-colors select-none">
+      {/* Top Bar (Docked at top, covers Notch) */}
+      <div className="flex-shrink-0">
+        <Navbar
+          onOpenImport={() => setIsImportOpen(true)}
+          onOpenNewManual={handleOpenNewManual}
+          isDark={isDark}
+          onToggleDark={() => setIsDark(!isDark)}
+        />
+      </div>
 
-      {/* Main Content Area */}
-      <main className="flex-1">
+      {/* Main Content Area (Independent scroll container with iOS momentum) */}
+      <main className="flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain pb-6">
         {activeTab === 'dashboard' && (
           <Dashboard
             transactions={transactions}
@@ -134,7 +136,7 @@ export function App() {
         )}
       </main>
 
-      {/* iOS Floating Bottom Bar */}
+      {/* iOS Bottom Bar (Docked firmly at bottom, immune to page scrolling) */}
       <BottomNav
         activeTab={activeTab}
         onTabChange={setActiveTab}
