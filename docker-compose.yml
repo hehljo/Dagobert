@@ -1,0 +1,9 @@
+version: '3.8'
+
+services:
+  dagobert:
+    build: .
+    container_name: dagobert
+    restart: unless-stopped
+    ports:
+      - "5052:80"
