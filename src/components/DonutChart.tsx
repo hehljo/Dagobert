@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { PieChart, Tag } from 'lucide-react';
+import { CategoryIcon } from './CategoryIcon.tsx';
 
 export interface DonutSlice {
   id: string;
@@ -21,8 +23,8 @@ export const DonutChart: React.FC<DonutChartProps> = ({ slices, currency = '€'
 
   if (total <= 0 || slices.length === 0) {
     return (
-      <div className="h-64 flex flex-col items-center justify-center text-ios-gray text-sm">
-        <span className="text-3xl mb-2">📊</span>
+      <div className="h-64 flex flex-col items-center justify-center text-ios-gray text-sm space-y-2">
+        <PieChart className="w-8 h-8 opacity-40" />
         <span>Keine Ausgaben in diesem Zeitraum</span>
       </div>
     );
@@ -96,7 +98,9 @@ export const DonutChart: React.FC<DonutChartProps> = ({ slices, currency = '€'
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none px-4">
           {activeSlice ? (
             <>
-              <span className="text-xl">{activeSlice.icon || '🏷️'}</span>
+              <div className="mb-1 text-slate-800 dark:text-slate-200">
+                {activeSlice.icon ? <CategoryIcon name={activeSlice.icon} className="w-5 h-5 mx-auto" /> : <Tag className="w-5 h-5 mx-auto" />}
+              </div>
               <span className="text-xs text-ios-gray font-medium truncate max-w-[120px]">{activeSlice.label}</span>
               <span className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">
                 {activeSlice.value.toLocaleString('de-DE', { minimumFractionDigits: 2 })} {currency}
@@ -129,9 +133,9 @@ export const DonutChart: React.FC<DonutChartProps> = ({ slices, currency = '€'
             >
               <div className="flex items-center space-x-2.5 min-w-0">
                 <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: slice.color }} />
-                <span className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">
-                  {slice.icon && <span className="mr-1.5">{slice.icon}</span>}
-                  {slice.label}
+                <span className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate flex items-center gap-1.5">
+                  {slice.icon && <CategoryIcon name={slice.icon} className="w-4 h-4 text-ios-gray flex-shrink-0" />}
+                  <span>{slice.label}</span>
                 </span>
               </div>
               <div className="flex items-center space-x-2 text-sm text-right flex-shrink-0">

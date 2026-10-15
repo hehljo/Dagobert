@@ -3,6 +3,7 @@ import { Plus, Sparkles, Trash2, Play, Check } from 'lucide-react';
 import type { CategoryRule, Category } from '../types/index.ts';
 import { evaluateRules } from '../lib/rulesEngine.ts';
 import { db } from '../lib/db.ts';
+import { CategoryIcon } from './CategoryIcon.tsx';
 
 interface RulesViewProps {
   rules: CategoryRule[];
@@ -144,7 +145,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ rules, categories, onRules
                 className="w-full px-3 py-2 bg-slate-100 dark:bg-neutral-800 rounded-xl outline-none font-medium"
               >
                 {categories.map((c) => (
-                  <option key={c.id} value={c.id}>{c.icon} {c.name}</option>
+                  <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
             </div>
@@ -242,7 +243,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ rules, categories, onRules
                     color: cat?.color || '#8E8E93'
                   }}
                 >
-                  <span>{cat?.icon}</span>
+                  {cat?.icon && <CategoryIcon name={cat.icon} className="w-3.5 h-3.5" />}
                   <span className="hidden sm:inline">{cat?.name}</span>
                 </span>
 

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Download, Upload, Trash2, Shield, Moon, Sun, Database, Sparkles } from 'lucide-react';
+import { Download, Upload, Trash2, Shield, Moon, Sun, Database, Sparkles, Fingerprint, KeyRound, Lock, Check } from 'lucide-react';
 import { db, initDatabaseDefaults } from '../lib/db.ts';
+import { getSecurityConfig, saveSecurityConfig, registerPasskey, isPasskeySupported, hashPin, type SecurityConfig } from '../lib/passkey.ts';
 
 interface SettingsViewProps {
   isDark: boolean;
@@ -10,6 +11,55 @@ interface SettingsViewProps {
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark, onDataChanged }) => {
   const [isExporting, setIsExporting] = useState(false);
+  const [security, setSecurity] = useState<SecurityConfig>(getSecurityConfig());
+  const [pinInput, setPinInput] = useState('');
+  const [showPinSetup, setShowPinSetup] = useState(false);
+  const [secNotice, setSecNotice] = useState<string | null>(null);
+
+  const handleToggleSecurity = async () => {
+    if (security.enabled) {
+      if (confirm('App-Sperre deaktivieren?')) {
+        const next: SecurityConfig = { enabled: false, type: 'pin' };
+        saveSecurityConfig(next);
+        setSecurity(next);
+        setSecNotice('App-Sperre deaktiviert.');
+      }
+      return;
+    }
+
+    // Try passkey if supported
+    if (isPasskeySupported()) {
+      try {
+        const credId = await registerPasskey('Johannes Hehl');
+        const next: SecurityConfig = { enabled: true, type: 'passkey', credentialId: credId };
+        saveSecurityConfig(next);
+        setSecurity(next);
+        setSecNotice('Passkey (Face ID / Touch ID) erfolgreich eingerichtet!');
+        return;
+      } catch (err: unknown) {
+        console.warn('Passkey registration not completed:', err);
+      }
+    }
+
+    // Fallback to PIN setup
+    setShowPinSetup(true);
+  };
+
+  const handleSavePin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pinInput.length < 4) {
+      alert('PIN muss mindestens 4 Ziffern lang sein.');
+      return;
+    }
+
+    const hashed = await hashPin(pinInput);
+    const next: SecurityConfig = { enabled: true, type: 'pin', pinHash: hashed };
+    saveSecurityConfig(next);
+    setSecurity(next);
+    setShowPinSetup(false);
+    setPinInput('');
+    setSecNotice('PIN-Sperre erfolgreich aktiviert!');
+  };
 
   const handleExportBackup = async () => {
     setIsExporting(true);
@@ -63,7 +113,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
   };
 
   const handleLoadDemoData = async () => {
-    if (!confirm('Demo-Daten für comdirect laden? (Fügt realistische Testbuchungen mit Umlauten ein)')) return;
+    if (!confirm('Demo-Daten für comdirect laden? (Fügt Testbuchungen mit Umlauten ein)')) return;
 
     const sampleTxs = [
       {
@@ -174,6 +224,88 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
             Deine Finanzdaten und Kontoumsätze verlassen niemals dieses Gerät. Die gesamte Verarbeitung, der CSV-Import und die Speicherung laufen ausschließlich lokal in deiner Browser-Datenbank (IndexedDB).
           </p>
         </div>
+      </div>
+
+      {/* Security & App Lock (Passkey / PIN) */}
+      <div className="bg-white dark:bg-ios-darkCard rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
+        <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+          <Lock className="w-4 h-4 text-ios-tint" />
+          <span>Sicherheit &amp; App-Sperre</span>
+        </h3>
+
+        {secNotice && (
+          <div className="p-3 bg-ios-green/10 border border-ios-green/20 rounded-2xl flex items-center space-x-2 text-ios-green text-xs font-medium">
+            <Check className="w-4 h-4" />
+            <span>{secNotice}</span>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-neutral-800 flex items-center justify-center">
+              {security.type === 'passkey' ? (
+                <Fingerprint className="w-5 h-5 text-ios-tint" />
+              ) : (
+                <KeyRound className="w-5 h-5 text-ios-tint" />
+              )}
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                {security.enabled ? (security.type === 'passkey' ? 'Passkey aktiv' : 'PIN-Sperre aktiv') : 'App-Sperre inaktiv'}
+              </p>
+              <p className="text-xs text-ios-gray">
+                {security.enabled
+                  ? 'Beim Öffnen der App ist eine Entsperrung erforderlich'
+                  : 'Schütze deine Finanzdaten vor neugierigen Blicken'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleToggleSecurity}
+            className={`w-12 h-7 rounded-full p-1 transition-colors ${security.enabled ? 'bg-ios-green' : 'bg-slate-300'}`}
+          >
+            <div className={`w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${security.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+          </button>
+        </div>
+
+        {/* PIN Setup Form */}
+        {showPinSetup && (
+          <form onSubmit={handleSavePin} className="p-4 bg-slate-50 dark:bg-neutral-800/60 rounded-2xl space-y-3 animate-fade-in text-xs">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-800 dark:text-slate-200">Sicherheits-PIN festlegen</span>
+              <button
+                type="button"
+                onClick={() => setShowPinSetup(false)}
+                className="text-ios-gray hover:text-slate-900"
+              >
+                Abbrechen
+              </button>
+            </div>
+            <p className="text-ios-gray text-[11px]">
+              {isPasskeySupported()
+                ? 'Passkey fehlgeschlagen oder abgebrochen. Lege stattdessen eine 4-6 stellige PIN fest:'
+                : 'Passkeys benötigen eine sichere Verbindung (HTTPS oder localhost). Bitte lege eine PIN fest:'}
+            </p>
+            <div className="flex space-x-2">
+              <input
+                type="password"
+                maxLength={6}
+                placeholder="4-6 Ziffern"
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value)}
+                className="flex-1 px-3 py-2 bg-white dark:bg-neutral-700 rounded-xl outline-none font-mono text-center tracking-widest text-sm"
+              />
+              <button
+                type="submit"
+                disabled={pinInput.length < 4}
+                className="px-4 py-2 bg-ios-tint text-white rounded-xl font-semibold disabled:opacity-50"
+              >
+                PIN speichern
+              </button>
+            </div>
+          </form>
+        )}
       </div>
 
       {/* Theme & Display */}

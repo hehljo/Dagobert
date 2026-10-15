@@ -1,5 +1,5 @@
 import React from 'react';
-import { Upload, Plus, Moon, Sun } from 'lucide-react';
+import { Upload, Plus, Moon, Sun, Landmark } from 'lucide-react';
 
 interface NavbarProps {
   onOpenImport: () => void;
@@ -19,8 +19,8 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
         {/* Logo & Brand */}
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-300 flex items-center justify-center shadow-md shadow-amber-500/20 text-xl font-bold">
-            🪙
+          <div className="w-10 h-10 rounded-2xl bg-ios-tint flex items-center justify-center shadow-md shadow-ios-tint/20 text-white">
+            <Landmark className="w-5 h-5" />
           </div>
           <div>
             <h1 className="font-bold text-lg leading-tight tracking-tight text-slate-900 dark:text-white">

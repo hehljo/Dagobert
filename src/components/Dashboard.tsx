@@ -64,7 +64,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           label: c?.name || catId,
           value: amount,
           color: c?.color || '#8E8E93',
-          icon: c?.icon || '📦'
+          icon: c?.icon || 'Package'
         };
       })
       .sort((a, b) => b.value - a.value);
@@ -125,7 +125,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="flex justify-between items-start">
             <span className="text-xs uppercase font-semibold tracking-wider text-slate-400">Netto Cashflow</span>
             <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
-              <Wallet className="w-4 h-4 text-amber-300" />
+              <Wallet className="w-4 h-4 text-ios-tint" />
             </div>
           </div>
           <div className="mt-3">
@@ -183,7 +183,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       {/* Empty State / Quick Import Banner */}
       {transactions.length === 0 && (
         <div className="bg-gradient-to-r from-ios-tint/10 to-purple-500/10 border border-ios-tint/30 rounded-3xl p-6 text-center space-y-4">
-          <div className="w-14 h-14 rounded-2xl bg-ios-tint text-white flex items-center justify-center mx-auto text-2xl shadow-lg shadow-ios-tint/30">
+          <div className="w-14 h-14 rounded-2xl bg-ios-tint text-white flex items-center justify-center mx-auto shadow-lg shadow-ios-tint/30">
             <Sparkles className="w-7 h-7" />
           </div>
           <div>

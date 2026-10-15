@@ -1,13 +1,13 @@
 import React, { useState, useMemo } from 'react';
-import { Search, Filter, Calendar } from 'lucide-react';
+import { Search, Filter, Calendar, X } from 'lucide-react';
 import type { Transaction, Category } from '../types/index.ts';
+import { CategoryIcon } from './CategoryIcon.tsx';
 
 interface TransactionsViewProps {
   transactions: Transaction[];
   categories: Category[];
   selectedCategoryFilter: string | null;
   onClearCategoryFilter: () => void;
-  onSelectCategoryFilter: (catId: string) => void;
   onSelectTransaction: (tx: Transaction) => void;
   selectedMonth: string;
 }
@@ -143,7 +143,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 onClick={onClearCategoryFilter}
                 className="ml-1 hover:text-amber-700 dark:hover:text-amber-200"
               >
-                ✕
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
           )}
@@ -183,10 +183,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       {/* Left: Icon & Names */}
                       <div className="flex items-center space-x-3 min-w-0 pr-2">
                         <div
-                          className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 text-lg shadow-sm"
-                          style={{ backgroundColor: `${cat?.color || '#8E8E93'}20` }}
+                          className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 text-sm shadow-sm"
+                          style={{
+                            backgroundColor: `${cat?.color || '#8E8E93'}20`,
+                            color: cat?.color || '#8E8E93'
+                          }}
                         >
-                          <span>{cat?.icon || '📦'}</span>
+                          <CategoryIcon name={cat?.icon || 'Package'} className="w-5 h-5" />
                         </div>
 
                         <div className="min-w-0">

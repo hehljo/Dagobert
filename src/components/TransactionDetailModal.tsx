@@ -3,6 +3,7 @@ import { X, Trash2, Sparkles, Check } from 'lucide-react';
 import type { Transaction, Category } from '../types/index.ts';
 import { createSuggestedRule } from '../lib/rulesEngine.ts';
 import { db } from '../lib/db.ts';
+import { CategoryIcon } from './CategoryIcon.tsx';
 
 interface TransactionDetailModalProps {
   transaction: Transaction | null;
@@ -118,7 +119,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
                       : 'border-transparent bg-slate-100 dark:bg-neutral-800 text-slate-800 dark:text-slate-200 hover:bg-slate-200/60'
                   }`}
                 >
-                  <span className="text-lg">{c.icon}</span>
+                  <CategoryIcon name={c.icon} className="w-5 h-5 flex-shrink-0" />
                   <span className="text-xs truncate flex-1">{c.name}</span>
                   {isSelected && <Check className="w-4 h-4 flex-shrink-0" />}
                 </button>

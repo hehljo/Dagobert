@@ -10,6 +10,8 @@ import { RulesView } from './components/RulesView.tsx';
 import { SettingsView } from './components/SettingsView.tsx';
 import { ImportModal } from './components/ImportModal.tsx';
 import { TransactionDetailModal } from './components/TransactionDetailModal.tsx';
+import { LockScreen } from './components/LockScreen.tsx';
+import { getSecurityConfig } from './lib/passkey.ts';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
@@ -17,6 +19,12 @@ export function App() {
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string | null>(null);
+
+  // App Lock State
+  const [isLocked, setIsLocked] = useState(() => {
+    const sec = getSecurityConfig();
+    return sec.enabled;
+  });
 
   // Initialize selected month to current (e.g. 2026-10)
   const [selectedMonth, setSelectedMonth] = useState(() => {
@@ -70,6 +78,11 @@ export function App() {
     setSelectedTx({ ...newTx, id });
   };
 
+  // Render LockScreen if app is locked
+  if (isLocked) {
+    return <LockScreen onUnlock={() => setIsLocked(false)} />;
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-ios-bg dark:bg-ios-darkBg transition-colors">
       {/* Top Bar */}
@@ -99,7 +112,6 @@ export function App() {
             categories={categories}
             selectedCategoryFilter={selectedCategoryFilter}
             onClearCategoryFilter={() => setSelectedCategoryFilter(null)}
-            onSelectCategoryFilter={(catId) => setSelectedCategoryFilter(catId)}
             onSelectTransaction={(tx) => setSelectedTx(tx)}
             selectedMonth={selectedMonth}
           />
