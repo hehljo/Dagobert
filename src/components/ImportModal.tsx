@@ -97,7 +97,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="bg-white dark:bg-ios-darkCard w-full max-w-2xl rounded-3xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto space-y-5 border border-ios-separator dark:border-ios-darkSeparator">
+      <div className="bg-white dark:bg-ios-darkCard w-full max-w-2xl rounded-3xl p-6 shadow-2xl max-h-[90dvh] overflow-y-auto space-y-5 border border-ios-separator dark:border-ios-darkSeparator">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2.5">

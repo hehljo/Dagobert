@@ -15,7 +15,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleDark,
 }) => {
   return (
-    <header className="sticky top-0 z-30 backdrop-blur-xl bg-white/75 dark:bg-black/75 border-b border-ios-separator dark:border-ios-darkSeparator transition-colors">
+    <header className="sticky top-0 z-30 backdrop-blur-xl bg-white/75 dark:bg-black/75 border-b border-ios-separator dark:border-ios-darkSeparator pt-[env(safe-area-inset-top,0px)] transition-colors">
       <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
         {/* Logo & Brand */}
         <div className="flex items-center space-x-3">
@@ -43,7 +43,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <button
             onClick={onOpenNewManual}
-            className="hidden sm:flex items-center space-x-1.5 px-3 py-2 rounded-xl text-sm font-medium bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 transition-colors"
+            aria-label="Neue manuelle Buchung erfassen"
+            className="hidden sm:flex items-center space-x-1.5 px-3 py-2 rounded-xl text-sm font-medium bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 transition-colors min-h-[44px]"
           >
             <Plus className="w-4 h-4" />
             <span>Neu</span>
@@ -51,7 +52,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <button
             onClick={onOpenImport}
-            className="flex items-center space-x-2 px-3.5 py-2 rounded-xl text-sm font-semibold bg-ios-tint text-white shadow-sm hover:brightness-110 active:scale-95 transition-all"
+            aria-label="CSV-Datei importieren"
+            className="flex items-center space-x-2 px-3.5 py-2 rounded-xl text-sm font-semibold bg-ios-tint text-white shadow-sm hover:brightness-110 active:scale-95 transition-all min-h-[44px]"
           >
             <Upload className="w-4 h-4" />
             <span className="hidden xs:inline">CSV Import</span>

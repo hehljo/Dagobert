@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Download, Upload, Trash2, Shield, Moon, Sun, Database, Sparkles, Fingerprint, KeyRound, Lock, Check } from 'lucide-react';
 import { db, initDatabaseDefaults } from '../lib/db.ts';
+import { APP_VERSION, BUILD_DATE } from '../version.ts';
 import { getSecurityConfig, saveSecurityConfig, registerPasskey, isPasskeySupported, hashPin, type SecurityConfig } from '../lib/passkey.ts';
 
 interface SettingsViewProps {
@@ -372,6 +373,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
             <span>Datenbank zurücksetzen</span>
           </button>
         </div>
+      </div>
+    
+      {/* App Version & Build Info */}
+      <div className="text-center py-4 text-xs text-ios-gray space-y-1">
+        <p className="font-semibold text-slate-700 dark:text-slate-300">
+          Dagobert v{APP_VERSION}
+        </p>
+        <p className="text-[11px]">
+          Build {BUILD_DATE} · Safe-Area &amp; Notch-Fix aktiv
+        </p>
       </div>
     </div>
   );
