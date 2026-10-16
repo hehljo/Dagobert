@@ -32,13 +32,15 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
   const handlePinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
-    if (!config.pinHash) {
-      onUnlock();
+
+    // Security check: Must have a valid stored PIN hash
+    if (!config.pinHash || config.pinHash.trim().length === 0) {
+      setErrorMsg('Sicherheits-Konfiguration unvollständig. Bitte PIN neu anlegen.');
       return;
     }
 
     const hashed = await hashPin(pin);
-    if (hashed === config.pinHash) {
+    if (hashed && hashed === config.pinHash) {
       onUnlock();
     } else {
       setErrorMsg('Falsche PIN. Bitte erneut versuchen.');

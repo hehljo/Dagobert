@@ -59,12 +59,13 @@ export function App() {
     setActiveTab('transactions');
   };
 
-  const handleOpenNewManual = async () => {
-    const newTx: Transaction = {
+  const handleOpenNewManual = () => {
+    // Uncommitted in-memory draft - NOT added to DB until user confirms!
+    const draftTx: Transaction = {
       date: new Date().toISOString().slice(0, 10),
       amount: -10.00,
       currency: 'EUR',
-      payee: 'Neue Ausgabe',
+      payee: '',
       purpose: '',
       rawText: 'Manuelle Buchung',
       type: 'Barzahlung',
@@ -74,8 +75,7 @@ export function App() {
       sourceHash: 'man_' + Date.now(),
       isManual: true,
     };
-    const id = await db.transactions.add(newTx);
-    setSelectedTx({ ...newTx, id });
+    setSelectedTx(draftTx);
   };
 
   // Render LockScreen if app is locked
@@ -161,9 +161,11 @@ export function App() {
         transaction={selectedTx}
         categories={categories}
         onClose={() => setSelectedTx(null)}
-        onUpdate={async (updated) => {
-          if (updated.id) {
-            await db.transactions.put(updated);
+        onSave={async (tx) => {
+          if (tx.id !== undefined) {
+            await db.transactions.put(tx);
+          } else {
+            await db.transactions.add(tx);
           }
         }}
         onDelete={async (id) => {

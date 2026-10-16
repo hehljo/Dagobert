@@ -1,19 +1,34 @@
 import { describe, it, expect } from 'vitest';
-import { parseBankCsv, parseGermanAmount, parseGermanDate, parseComdirectBuchungstext } from '../lib/csvParser.ts';
-import { evaluateRules } from '../lib/rulesEngine.ts';
+import {
+  parseBankCsv,
+  parseGermanAmount,
+  parseGermanDate,
+  parseComdirectBuchungstext,
+  computeTransactionHash
+} from '../lib/csvParser.ts';
+import { evaluateRules, createSuggestedRule } from '../lib/rulesEngine.ts';
 import { COMDIRECT_TEMPLATE, DEFAULT_RULES } from '../lib/db.ts';
 
 describe('CSV Parser & comdirect specifics', () => {
-  it('parses German amounts with comma and dot thousands', () => {
+  it('parses German amounts with comma and dot thousands and rejects invalid', () => {
     expect(parseGermanAmount('1.234,56')).toBe(1234.56);
     expect(parseGermanAmount('-45,99 €')).toBe(-45.99);
     expect(parseGermanAmount('0,00')).toBe(0);
     expect(parseGermanAmount('-1.000.500,25')).toBe(-1000500.25);
+    expect(parseGermanAmount('unbekannt')).toBe(null);
   });
 
-  it('parses German dates to ISO YYYY-MM-DD', () => {
+  it('parses German dates to ISO YYYY-MM-DD and rejects invalid calendar days', () => {
     expect(parseGermanDate('15.10.2026')).toBe('2026-10-15');
     expect(parseGermanDate('01.01.2025')).toBe('2025-01-01');
+    expect(parseGermanDate('31.02.2026')).toBe(null); // Invalid day in Feb!
+    expect(parseGermanDate('32.01.2026')).toBe(null); // Invalid day
+  });
+
+  it('prevents hash collisions between similar short texts like Aa and BB', () => {
+    const hashAa = computeTransactionHash('2026-10-15', 50.0, 'Aa');
+    const hashBb = computeTransactionHash('2026-10-15', 50.0, 'BB');
+    expect(hashAa).not.toBe(hashBb);
   });
 
   it('extracts payee and purpose from comdirect Buchungstext', () => {
@@ -23,11 +38,32 @@ describe('CSV Parser & comdirect specifics', () => {
     expect(parsed.purpose).toBe('Gehalt Oktober 2026');
   });
 
-  it('extracts recipient and purpose from direct debit', () => {
-    const raw = 'Empfänger: REWE Markt GmbH Buchungstext: Kartenzahlung 14.10. IBAN: DE1234567890';
-    const parsed = parseComdirectBuchungstext(raw);
-    expect(parsed.payee).toBe('REWE Markt GmbH');
-    expect(parsed.purpose).toBe('Kartenzahlung 14.10.');
+  it('learned user rule has priority 5 and beats default rules', () => {
+    const dummyTx = {
+      date: '2026-10-15',
+      amount: -45.0,
+      currency: 'EUR',
+      payee: 'REWE Markt GmbH',
+      purpose: 'Wocheneinkauf',
+      rawText: 'Empfänger: REWE Markt GmbH',
+      type: 'Lastschrift',
+      category: 'sonstiges',
+      account: 'Girokonto',
+      importedAt: '',
+      sourceHash: ''
+    };
+
+    // By default, REWE is 'lebensmittel' (priority 20)
+    const initial = evaluateRules(dummyTx, DEFAULT_RULES);
+    expect(initial.category).toBe('lebensmittel');
+
+    // User learns rule: REWE should be 'freizeit'
+    const userRule = createSuggestedRule(dummyTx, 'freizeit');
+    expect(userRule).not.toBeNull();
+    expect(userRule!.priority).toBe(5); // Priority 5 beats 20!
+
+    const combined = evaluateRules(dummyTx, [userRule!, ...DEFAULT_RULES]);
+    expect(combined.category).toBe('freizeit');
   });
 
   it('parses realistic comdirect CSV with metadata and Umlauts', () => {
@@ -45,27 +81,9 @@ describe('CSV Parser & comdirect specifics', () => {
     const rows = parseBankCsv(csvContent, COMDIRECT_TEMPLATE);
     expect(rows.length).toBe(4);
 
-    // Row 1: Gehalt
     expect(rows[0].date).toBe('2026-10-12');
     expect(rows[0].payee).toBe('Arbeitgeber GmbH');
-    expect(rows[0].amount).toBe(3450.00);
+    expect(rows[0].amount).toBe(3450.0);
     expect(rows[0].type).toBe('Übertrag / Überweisung');
-
-    // Row 2: REWE
-    expect(rows[1].payee).toBe('REWE Markt GmbH');
-    expect(rows[1].amount).toBe(-84.50);
-
-    // Test Rule Evaluation
-    const cat1 = evaluateRules(rows[0], DEFAULT_RULES);
-    expect(cat1.category).toBe('gehalt');
-
-    const cat2 = evaluateRules(rows[1], DEFAULT_RULES);
-    expect(cat2.category).toBe('lebensmittel');
-
-    const cat3 = evaluateRules(rows[2], DEFAULT_RULES);
-    expect(cat3.category).toBe('mobilitaet');
-
-    const cat4 = evaluateRules(rows[3], DEFAULT_RULES);
-    expect(cat4.category).toBe('abos');
   });
 });

@@ -93,23 +93,46 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       const text = await file.text();
       const data = JSON.parse(text);
 
-      if (data.transactions) {
-        await db.transactions.clear();
-        await db.transactions.bulkAdd(data.transactions);
+      // 1. Strict Validation: Must be valid object with expected arrays
+      if (!data || typeof data !== 'object') {
+        throw new Error('Ungültiges Dateiformat (kein JSON-Objekt).');
       }
-      if (data.categories) {
-        await db.categories.clear();
-        await db.categories.bulkAdd(data.categories);
+
+      const hasTxs = Array.isArray(data.transactions);
+      const hasCats = Array.isArray(data.categories);
+      const hasRules = Array.isArray(data.rules);
+      const hasTemplates = Array.isArray(data.bankTemplates);
+
+      if (!hasTxs && !hasCats && !hasRules) {
+        throw new Error('Die Backup-Datei enthält keine bekannten Dagobert-Daten.');
       }
-      if (data.rules) {
-        await db.rules.clear();
-        await db.rules.bulkAdd(data.rules);
-      }
+
+      // 2. Atomic Replacement: Only clear and replace inside a single Dexie transaction
+      await db.transaction('rw', [db.transactions, db.categories, db.rules, db.bankTemplates], async () => {
+        if (hasTxs) {
+          await db.transactions.clear();
+          await db.transactions.bulkAdd(data.transactions);
+        }
+        if (hasCats) {
+          await db.categories.clear();
+          await db.categories.bulkAdd(data.categories);
+        }
+        if (hasRules) {
+          await db.rules.clear();
+          await db.rules.bulkAdd(data.rules);
+        }
+        if (hasTemplates) {
+          await db.bankTemplates.clear();
+          await db.bankTemplates.bulkAdd(data.bankTemplates);
+        }
+      });
 
       alert('Backup erfolgreich wiederhergestellt!');
       onDataChanged();
-    } catch {
-      alert('Ungültige Backup-Datei.');
+    } catch (err: unknown) {
+      alert(`Fehler beim Wiederherstellen: ${err instanceof Error ? err.message : 'Ungültige Datei'}`);
+    } finally {
+      e.target.value = ''; // Reset input
     }
   };
 

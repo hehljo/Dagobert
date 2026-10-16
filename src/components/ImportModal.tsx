@@ -29,6 +29,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [fileName, setFileName] = useState<string | null>(null);
   const [previewRows, setPreviewRows] = useState<ImportPreviewRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isCommitting, setIsCommitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const selectedTemplate = bankTemplates.find(t => t.id === selectedTemplateId) || bankTemplates[0];
@@ -64,32 +65,47 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   };
 
   const handleCommitImport = async () => {
-    // Only import non-duplicates
-    const toImport = previewRows.filter(r => !r.isDuplicate);
-    if (toImport.length === 0) {
-      alert('Keine neuen Buchungen zum Importieren vorhanden.');
-      return;
+    if (isCommitting) return; // Prevent double-click
+    setIsCommitting(true);
+
+    try {
+      const toImport = previewRows.filter(r => !r.isDuplicate);
+      if (toImport.length === 0) {
+        alert('Keine neuen Buchungen zum Importieren vorhanden.');
+        return;
+      }
+
+      const now = new Date().toISOString();
+      const txs: Transaction[] = toImport.map(row => ({
+        date: row.date,
+        valutaDate: row.valutaDate,
+        amount: row.amount,
+        currency: 'EUR',
+        payee: row.payee,
+        purpose: row.purpose,
+        rawText: row.rawText,
+        type: row.type,
+        category: row.category,
+        account: selectedTemplate.name,
+        importedAt: now,
+        sourceHash: row.sourceHash
+      }));
+
+      // Atomic write inside Dexie transaction checking existing hashes
+      await db.transaction('rw', db.transactions, async () => {
+        const existing = await db.transactions.toArray();
+        const existingHashes = new Set(existing.map(t => t.sourceHash));
+        const deduplicated = txs.filter(t => !existingHashes.has(t.sourceHash));
+        if (deduplicated.length > 0) {
+          await db.transactions.bulkAdd(deduplicated);
+        }
+      });
+
+      onImportComplete(txs.length);
+      onClose();
+    } finally {
+      setIsCommitting(false);
     }
-
-    const now = new Date().toISOString();
-    const txs: Transaction[] = toImport.map(row => ({
-      date: row.date,
-      valutaDate: row.valutaDate,
-      amount: row.amount,
-      currency: 'EUR',
-      payee: row.payee,
-      purpose: row.purpose,
-      rawText: row.rawText,
-      type: row.type,
-      category: row.category,
-      account: selectedTemplate.name,
-      importedAt: now,
-      sourceHash: row.sourceHash
-    }));
-
-    await db.transactions.bulkAdd(txs);
-    onImportComplete(txs.length);
-    onClose();
   };
 
   const newCount = previewRows.filter(r => !r.isDuplicate).length;
@@ -246,10 +262,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
               <button
                 onClick={handleCommitImport}
-                disabled={newCount === 0}
+                disabled={newCount === 0 || isCommitting}
                 className="flex-1 py-3 px-4 rounded-2xl bg-ios-tint text-white font-semibold text-sm shadow-md hover:brightness-110 active:scale-95 disabled:opacity-50 transition-all flex items-center justify-center space-x-2"
               >
-                <span>{newCount} Buchungen speichern</span>
+                <span>{isCommitting ? 'Wird gespeichert...' : `${newCount} Buchungen speichern`}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>

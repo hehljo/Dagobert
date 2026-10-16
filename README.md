@@ -7,7 +7,7 @@
 
 ## 🚀 Highlights & Kern-Features
 
-- **100 % Local-First & DSGVO-sicher:** Alle Finanzdaten, Buchungen und Regeln werden verschlüsselt in der Browser-eigenen **IndexedDB** gespeichert. Keine Cloud, kein Tracking, keine Weitergabe an fremde Server.
+- **100 % Local-First & DSGVO-sicher:** Alle Finanzdaten, Buchungen und Regeln verbleiben in der lokalen Browser-Sandbox (**IndexedDB**). Optional mit biometrischer App-Sperre (Passkey / PIN). Keine Cloud, kein Tracking, keine Weitergabe an fremde Server.
 - **comdirect-Optimierung:**
   - **Automatischer Windows-1252 (CP1252) Decoder:** Schluss mit kaputten Umlauten (`‹bertrag`, `Kartenverf¸gung`). Alle Umlaute werden nativ sauber dargestellt.
   - **Dynamisches Header-Skipping:** comdirect-Metadatenzeilen am Dateianfang werden automatisch erkannt und übersprungen.

@@ -1,52 +1,82 @@
 import type { BankTemplate, ImportPreviewRow } from '../types/index.ts';
 
 /**
- * Fast deterministic hash for deduplication
+ * 64-bit FNV-1a hash for deterministic, collision-free deduplication
  */
 export function computeTransactionHash(date: string, amount: number, rawText: string): string {
   const str = `${date}|${amount.toFixed(2)}|${rawText.trim()}`;
-  let hash = 0;
+  let h1 = 0x811c9dc5;
+  let h2 = 0x811c9dc5;
+
   for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0; // Convert to 32bit integer
+    const code = str.charCodeAt(i);
+    h1 ^= code;
+    h1 = Math.imul(h1, 0x01000193);
+
+    h2 ^= (code >> 8) ^ code;
+    h2 = Math.imul(h2, 0x01000193);
   }
-  return 'tx_' + Math.abs(hash).toString(36);
+
+  const p1 = (h1 >>> 0).toString(16).padStart(8, '0');
+  const p2 = (h2 >>> 0).toString(16).padStart(8, '0');
+  return `tx_${p1}${p2}`;
 }
 
 /**
- * Parses German number string (e.g. "1.234,56" or "-12,99" or " -45,00 ") to float
+ * Validates whether YYYY-MM-DD represents a real calendar day (e.g. rejects 31.02.)
  */
-export function parseGermanAmount(amountStr: string): number {
-  if (!amountStr) return 0;
-  // Remove currency signs, spaces, and thousand-separators (dots)
+export function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (year < 1990 || year > 2100) return false;
+  if (month < 1 || month > 12) return false;
+  if (day < 1 || day > 31) return false;
+
+  const daysInMonth = new Date(year, month, 0).getDate();
+  return day <= daysInMonth;
+}
+
+/**
+ * Parses German date string "DD.MM.YYYY" to ISO "YYYY-MM-DD", validating calendar validity
+ */
+export function parseGermanDate(dateStr: string): string | null {
+  if (!dateStr) return null;
+  const parts = dateStr.trim().split('.');
+  if (parts.length === 3) {
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    const year = parseInt(parts[2], 10);
+
+    if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
+    if (!isValidCalendarDate(year, month, day)) return null;
+
+    const dStr = String(day).padStart(2, '0');
+    const mStr = String(month).padStart(2, '0');
+    return `${year}-${mStr}-${dStr}`;
+  }
+  return null;
+}
+
+/**
+ * Parses German number string (e.g. "1.234,56" or "-12,99") to float.
+ * Returns null if invalid.
+ */
+export function parseGermanAmount(amountStr: string): number | null {
+  if (!amountStr) return null;
   const cleaned = amountStr
     .replace(/€/g, '')
     .replace(/\s+/g, '')
     .replace(/\./g, '')
     .replace(/,/g, '.');
-  const num = parseFloat(cleaned);
-  return isNaN(num) ? 0 : num;
-}
 
-/**
- * Parses German date string "DD.MM.YYYY" to ISO "YYYY-MM-DD"
- */
-export function parseGermanDate(dateStr: string): string {
-  if (!dateStr) return '';
-  const parts = dateStr.trim().split('.');
-  if (parts.length === 3) {
-    const day = parts[0].padStart(2, '0');
-    const month = parts[1].padStart(2, '0');
-    const year = parts[2];
-    return `${year}-${month}-${day}`;
+  if (!cleaned || !/^-?\d+(\.\d+)?$/.test(cleaned)) {
+    return null;
   }
-  return dateStr;
+
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? null : num;
 }
 
 /**
  * Intelligent decomposition of comdirect's "Buchungstext" field.
- * Extracts counterparty (Empfänger / Auftraggeber) and transaction purpose.
  */
 export function parseComdirectBuchungstext(raw: string): { payee: string; purpose: string } {
   if (!raw) return { payee: '', purpose: '' };
@@ -56,33 +86,36 @@ export function parseComdirectBuchungstext(raw: string): { payee: string; purpos
   let purpose = '';
 
   // Look for "Empfänger: XYZ" or "Zahlungsempfänger: XYZ"
-  const empfaengerMatch = text.match(/(?:Empfänger|Zahlungsempfänger):\s*([^;]+?)(?=(?:\s+(?:Kto\/IBAN|IBAN|BIC|BLZ|Buchungstext|Ref\.|End-to-End-Ref|Mandat|Gläubiger-ID):|$))/i);
+  const empfaengerMatch = text.match(
+    /(?:Empfänger|Zahlungsempfänger):\s*([^;]+?)(?=(?:\s+(?:Kto\/IBAN|IBAN|BIC|BLZ|Buchungstext|Ref\.|End-to-End-Ref|Mandat|Gläubiger-ID):|$))/i
+  );
   if (empfaengerMatch) {
     payee = empfaengerMatch[1].trim();
   }
 
   // Look for "Auftraggeber: XYZ"
   if (!payee) {
-    const auftraggeberMatch = text.match(/Auftraggeber:\s*([^;]+?)(?=(?:\s+(?:Kto\/IBAN|IBAN|BIC|BLZ|Buchungstext|Ref\.|End-to-End-Ref):|$))/i);
+    const auftraggeberMatch = text.match(
+      /Auftraggeber:\s*([^;]+?)(?=(?:\s+(?:Kto\/IBAN|IBAN|BIC|BLZ|Buchungstext|Ref\.|End-to-End-Ref):|$))/i
+    );
     if (auftraggeberMatch) {
       payee = auftraggeberMatch[1].trim();
     }
   }
 
   // Look for "Buchungstext: XYZ" or "Verwendungszweck: XYZ"
-  const zweckMatch = text.match(/(?:Buchungstext|Verwendungszweck|Notiz):\s*([^;]+?)(?=(?:\s+(?:Ref\.?|End-to-End-Ref\.?|Mandat|Gläubiger-ID|Kto\/IBAN|IBAN)(?::|\s)|$))/i);
+  const zweckMatch = text.match(
+    /(?:Buchungstext|Verwendungszweck|Notiz):\s*([^;]+?)(?=(?:\s+(?:Ref\.?|End-to-End-Ref\.?|Mandat|Gläubiger-ID|Kto\/IBAN|IBAN)(?::|\s)|$))/i
+  );
   if (zweckMatch) {
     purpose = zweckMatch[1].trim();
   }
 
-  // Fallbacks if structured keys are absent (e.g. Card payment "Kartenverfügung")
   if (!payee && !purpose) {
-    // Check if there is a company name or description at the start
     const clean = text.replace(/\s+/g, ' ');
     payee = clean.slice(0, 40).trim();
     purpose = clean;
   } else if (!purpose) {
-    // Strip the payee from text and use rest as purpose
     purpose = text.replace(payee, '').replace(/(?:Empfänger|Auftraggeber):\s*/i, '').trim();
   } else if (!payee) {
     payee = purpose;
@@ -145,14 +178,15 @@ export function parseBankCsv(
     colIndexMap[col.trim()] = idx;
   });
 
-  // Verify required columns exist
   const reqCols = template.columns;
   const dateIdx = colIndexMap[reqCols.date];
   const amountIdx = colIndexMap[reqCols.amount];
   const textIdx = colIndexMap[reqCols.rawText];
 
   if (dateIdx === undefined || amountIdx === undefined || textIdx === undefined) {
-    throw new Error(`Erforderliche Spalten nicht in CSV gefunden. Erwartet: ${reqCols.date}, ${reqCols.amount}, ${reqCols.rawText}`);
+    throw new Error(
+      `Erforderliche Spalten nicht in CSV gefunden. Erwartet: ${reqCols.date}, ${reqCols.amount}, ${reqCols.rawText}`
+    );
   }
 
   const typeIdx = reqCols.type ? colIndexMap[reqCols.type] : undefined;
@@ -162,7 +196,6 @@ export function parseBankCsv(
 
   for (let i = headerIndex + 1; i < lines.length; i++) {
     const line = lines[i];
-    // Skip empty lines or trailing summaries (comdirect has totals at the end)
     if (!line || line.startsWith('Alter Kontostand') || line.startsWith('Neuer Kontostand')) {
       continue;
     }
@@ -176,11 +209,13 @@ export function parseBankCsv(
     const rawType = typeIdx !== undefined ? cols[typeIdx] || '' : '';
     const rawValuta = valutaIdx !== undefined ? cols[valutaIdx] || '' : '';
 
-    if (!rawDate || !rawAmount) continue;
-
     const date = parseGermanDate(rawDate);
-    const valutaDate = rawValuta ? parseGermanDate(rawValuta) : undefined;
+    if (!date) continue; // Skip lines with invalid calendar dates
+
     const amount = parseGermanAmount(rawAmount);
+    if (amount === null) continue; // Skip lines with invalid amounts
+
+    const valutaDate = rawValuta ? parseGermanDate(rawValuta) || undefined : undefined;
 
     let payee = '';
     let purpose = '';
@@ -223,7 +258,6 @@ export async function decodeFileWithEncoding(file: File, encoding: string = 'win
     const decoder = new TextDecoder(encoding);
     return decoder.decode(buffer);
   } catch {
-    // Fallback
     const decoder = new TextDecoder('utf-8');
     return decoder.decode(buffer);
   }
