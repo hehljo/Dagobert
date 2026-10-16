@@ -206,14 +206,14 @@ app.post('/api/transactions/batch', (req, res) => {
   const { profileId, transactions = [], accountCheckpoint } = req.body;
   if (!profileId) return res.status(400).json({ error: 'profileId erforderlich' });
 
-  const existing = db.prepare('SELECT id, date, amount, payee, status, source_hash FROM transactions WHERE profile_id = ?').all(profileId);
+  const existing = db.prepare('SELECT id, date, amount, payee, account, status, source_hash FROM transactions WHERE profile_id = ?').all(profileId);
   const existingHashes = new Set(existing.map(t => t.source_hash));
 
   // Pending queue map
   const pendingQueue = new Map();
   existing.forEach(t => {
     if (t.status === 'pending') {
-      const key = `${t.date}|${Number(t.amount).toFixed(2)}|${t.payee.trim().toLowerCase()}`;
+      const key = `${t.date}|${Number(t.amount).toFixed(2)}|${t.payee.trim().toLowerCase()}|${t.account || 'comdirect Girokonto'}`;
       const list = pendingQueue.get(key) || [];
       list.push(t);
       pendingQueue.set(key, list);
@@ -268,7 +268,15 @@ app.post('/api/transactions/batch', (req, res) => {
     // 2. Insert or promote transactions
     const now = new Date().toISOString();
     for (const t of transactions) {
-      const key = `${t.date}|${Number(t.amount).toFixed(2)}|${t.payee.trim().toLowerCase()}`;
+      // Priority 1: If an identical booked hash already exists, it is a duplicate!
+      if (existingHashes.has(t.sourceHash)) {
+        skippedDuplicates++;
+        continue;
+      }
+
+      // Priority 2: Check account-scoped and payee-scoped pending promotions
+      const accountName = t.account || 'comdirect Girokonto';
+      const key = `${t.date}|${Number(t.amount).toFixed(2)}|${t.payee.trim().toLowerCase()}|${accountName}`;
       const pendingList = pendingQueue.get(key);
 
       if (pendingList && pendingList.length > 0 && t.status === 'booked') {
@@ -276,27 +284,25 @@ app.post('/api/transactions/batch', (req, res) => {
         updatePending.run(t.rawText, t.type, t.sourceHash, target.id);
         existingHashes.add(t.sourceHash);
         updatedCount++;
-      } else if (!existingHashes.has(t.sourceHash)) {
+      } else {
         insertTx.run(
           profileId,
           t.date,
           t.valutaDate || null,
-          t.amount,
+          Number(t.amount),
           t.currency || 'EUR',
-          t.payee,
-          t.purpose,
-          t.rawText,
-          t.type,
-          t.category,
-          t.account || 'comdirect Girokonto',
+          t.payee || 'Unbekannt',
+          t.purpose || '',
+          t.rawText || '',
+          t.type || '',
+          t.category || 'sonstiges',
+          accountName,
           t.status || 'booked',
           t.sourceHash,
           now
         );
         existingHashes.add(t.sourceHash);
         insertedCount++;
-      } else {
-        skippedDuplicates++;
       }
     }
   });
@@ -345,15 +351,26 @@ app.put('/api/transactions/:id', (req, res) => {
   const { transaction } = req.body;
   if (!transaction) return res.status(400).json({ error: 'Keine Daten' });
 
+  const existing = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id);
+  if (!existing) return res.status(404).json({ error: 'Buchung nicht gefunden' });
+
+  const updatedDate = transaction.date ?? existing.date;
+  const updatedAmount = transaction.amount !== undefined ? Number(transaction.amount) : existing.amount;
+  const updatedPayee = transaction.payee ?? existing.payee;
+  const updatedPurpose = transaction.purpose ?? existing.purpose;
+  const updatedCategory = transaction.category ?? existing.category;
+  const updatedStatus = transaction.status ?? existing.status;
+
   db.prepare(`
     UPDATE transactions
     SET date = ?,
         amount = ?,
         payee = ?,
         purpose = ?,
-        category = ?
+        category = ?,
+        status = ?
     WHERE id = ?
-  `).run(transaction.date, transaction.amount, transaction.payee, transaction.purpose, transaction.category, id);
+  `).run(updatedDate, updatedAmount, updatedPayee, updatedPurpose, updatedCategory, updatedStatus, id);
 
   res.json({ success: true });
 });
@@ -385,6 +402,12 @@ app.post('/api/rules', (req, res) => {
   db.prepare(`
     INSERT INTO rules (id, profile_id, name, priority, conditions, apply_category, enabled)
     VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id, profile_id) DO UPDATE SET
+      name = excluded.name,
+      priority = excluded.priority,
+      conditions = excluded.conditions,
+      apply_category = excluded.apply_category,
+      enabled = excluded.enabled
   `).run(rule.id, profileId, rule.name, rule.priority, JSON.stringify(rule.conditions), rule.applyCategory, rule.enabled ? 1 : 0);
 
   res.json({ success: true });
@@ -392,7 +415,148 @@ app.post('/api/rules', (req, res) => {
 
 app.delete('/api/rules/:id', (req, res) => {
   const { id } = req.params;
-  db.prepare('DELETE FROM rules WHERE id = ?').run(id);
+  const profileId = req.query.profileId;
+  if (profileId) {
+    db.prepare('DELETE FROM rules WHERE id = ? AND profile_id = ?').run(id, profileId);
+  } else {
+    db.prepare('DELETE FROM rules WHERE id = ?').run(id);
+  }
+  res.json({ success: true });
+});
+
+
+// ----------------------------------------------------
+// Server-Side Backup & Restore Endpoints
+// ----------------------------------------------------
+app.get('/api/backup', (req, res) => {
+  const profileId = req.query.profileId || 'privat';
+  const profile = getProfile(profileId);
+  if (!profile) return res.status(404).json({ error: 'Profil nicht gefunden' });
+
+  const accounts = db.prepare('SELECT * FROM accounts WHERE profile_id = ?').all(profileId);
+  const categories = db.prepare('SELECT * FROM categories WHERE profile_id = ?').all(profileId);
+  const rules = db.prepare('SELECT * FROM rules WHERE profile_id = ?').all(profileId).map(r => ({
+    ...r,
+    conditions: JSON.parse(r.conditions),
+    applyCategory: r.apply_category,
+    enabled: !!r.enabled
+  }));
+  const transactions = db.prepare('SELECT * FROM transactions WHERE profile_id = ?').all(profileId);
+  const bankTemplates = db.prepare('SELECT * FROM bank_templates WHERE profile_id = ?').all(profileId).map(bt => ({
+    ...bt,
+    columns: JSON.parse(bt.columns)
+  }));
+
+  res.json({
+    exportedAt: new Date().toISOString(),
+    profileId,
+    profileName: profile.name,
+    accounts,
+    categories,
+    rules,
+    transactions,
+    bankTemplates
+  });
+});
+
+app.post('/api/backup/import', (req, res) => {
+  const { profileId, data } = req.body;
+  if (!profileId || !data) return res.status(400).json({ error: 'Daten unvollständig' });
+
+  const profile = getProfile(profileId);
+  if (!profile) return res.status(404).json({ error: 'Profil nicht gefunden' });
+
+  const txRunner = db.transaction(() => {
+    // Clear profile transactions and rules
+    db.prepare('DELETE FROM transactions WHERE profile_id = ?').run(profileId);
+    db.prepare('DELETE FROM rules WHERE profile_id = ?').run(profileId);
+
+    if (Array.isArray(data.transactions)) {
+      const insertTx = db.prepare(`
+        INSERT INTO transactions (
+          profile_id, date, valuta_date, amount, currency, payee, purpose,
+          raw_text, type, category, account, status, source_hash, imported_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const t of data.transactions) {
+        insertTx.run(
+          profileId,
+          t.date,
+          t.valutaDate || null,
+          Number(t.amount),
+          t.currency || 'EUR',
+          t.payee || 'Unbekannt',
+          t.purpose || '',
+          t.rawText || '',
+          t.type || '',
+          t.category || 'sonstiges',
+          t.account || 'comdirect Girokonto',
+          t.status || 'booked',
+          t.sourceHash || ('tx_' + Date.now().toString(36)),
+          t.importedAt || new Date().toISOString()
+        );
+      }
+    }
+
+    if (Array.isArray(data.rules)) {
+      const insertRule = db.prepare(`
+        INSERT INTO rules (id, profile_id, name, priority, conditions, apply_category, enabled)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const r of data.rules) {
+        insertRule.run(
+          r.id,
+          profileId,
+          r.name,
+          r.priority || 20,
+          typeof r.conditions === 'string' ? r.conditions : JSON.stringify(r.conditions || []),
+          r.applyCategory || r.apply_category || 'sonstiges',
+          r.enabled ? 1 : 0
+        );
+      }
+    }
+
+    if (Array.isArray(data.accounts) && data.accounts.length > 0) {
+      const updateAcc = db.prepare(`
+        UPDATE accounts
+        SET initial_balance = ?,
+            initial_balance_date = ?,
+            checkpoint_balance = ?,
+            checkpoint_date = ?
+        WHERE id = ? AND profile_id = ?
+      `);
+      for (const a of data.accounts) {
+        updateAcc.run(
+          a.initialBalance || a.initial_balance || 0,
+          a.initialBalanceDate || a.initial_balance_date || '2026-01-01',
+          a.checkpointBalance !== undefined ? a.checkpointBalance : (a.checkpoint_balance !== undefined ? a.checkpoint_balance : null),
+          a.checkpointDate || a.checkpoint_date || null,
+          a.id || 'comdirect',
+          profileId
+        );
+      }
+    }
+  });
+
+  txRunner();
+  res.json({ success: true });
+});
+
+app.post('/api/reset', (req, res) => {
+  const { profileId } = req.body;
+  if (!profileId) return res.status(400).json({ error: 'profileId erforderlich' });
+
+  const txRunner = db.transaction(() => {
+    db.prepare('DELETE FROM transactions WHERE profile_id = ?').run(profileId);
+    db.prepare('DELETE FROM rules WHERE profile_id = ?').run(profileId);
+    db.prepare('DELETE FROM categories WHERE profile_id = ?').run(profileId);
+    db.prepare('DELETE FROM bank_templates WHERE profile_id = ?').run(profileId);
+    db.prepare('DELETE FROM accounts WHERE profile_id = ?').run(profileId);
+
+    seedProfileDefaults(profileId);
+  });
+
+  txRunner();
   res.json({ success: true });
 });
 

@@ -1,4 +1,3 @@
-import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
@@ -9,9 +8,39 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'dagobert.db');
-const db = new Database(DB_PATH);
 
-// Enable WAL mode for high concurrency
+let dbInstance;
+
+try {
+  const { DatabaseSync } = await import('node:sqlite');
+  class NodeSqliteWrapper {
+    constructor(filePath) {
+      this._db = new DatabaseSync(filePath);
+    }
+    exec(sql) { return this._db.exec(sql); }
+    prepare(sql) { return this._db.prepare(sql); }
+    pragma(sql) { return this._db.exec(`PRAGMA ${sql};`); }
+    transaction(fn) {
+      return (...args) => {
+        this._db.exec('BEGIN');
+        try {
+          const res = fn(...args);
+          this._db.exec('COMMIT');
+          return res;
+        } catch (e) {
+          this._db.exec('ROLLBACK');
+          throw e;
+        }
+      };
+    }
+  }
+  dbInstance = new NodeSqliteWrapper(DB_PATH);
+} catch {
+  const BetterSqlite = (await import('better-sqlite3')).default;
+  dbInstance = new BetterSqlite(DB_PATH);
+}
+
+const db = dbInstance;
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
@@ -57,7 +86,7 @@ export function initDatabase() {
       profile_id TEXT NOT NULL,
       name TEXT NOT NULL,
       priority INTEGER NOT NULL DEFAULT 20,
-      conditions TEXT NOT NULL, -- JSON string
+      conditions TEXT NOT NULL,
       apply_category TEXT NOT NULL,
       enabled INTEGER NOT NULL DEFAULT 1,
       PRIMARY KEY (id, profile_id),
@@ -94,7 +123,7 @@ export function initDatabase() {
       encoding TEXT NOT NULL DEFAULT 'windows-1252',
       delimiter TEXT NOT NULL DEFAULT ';',
       header_identifier TEXT NOT NULL,
-      columns TEXT NOT NULL, -- JSON string
+      columns TEXT NOT NULL,
       text_parser TEXT NOT NULL DEFAULT 'comdirect',
       date_format TEXT NOT NULL DEFAULT 'DD.MM.YYYY',
       PRIMARY KEY (id, profile_id),
@@ -102,7 +131,6 @@ export function initDatabase() {
     );
   `);
 
-  // Check if default profile exists
   const profileCount = db.prepare('SELECT count(*) as count FROM profiles').get().count;
   if (profileCount === 0) {
     const now = new Date().toISOString();

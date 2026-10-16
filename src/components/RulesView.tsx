@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Plus, Sparkles, Trash2, Play, Check } from 'lucide-react';
 import type { CategoryRule, Category, Transaction } from '../types/index.ts';
 import { evaluateRules } from '../lib/rulesEngine.ts';
-import { createCategoryRule, deleteCategoryRule, updateExistingTransaction } from '../lib/api.ts';
+import { createCategoryRule, deleteCategoryRuleScoped, updateExistingTransaction } from '../lib/api.ts';
 import { CategoryIcon } from './CategoryIcon.tsx';
 
 interface RulesViewProps {
@@ -53,7 +53,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
 
   const handleDeleteRule = async (id: string) => {
     if (confirm('Regel wirklich löschen?')) {
-      await deleteCategoryRule(id);
+      await deleteCategoryRuleScoped(profileId, id);
       onRulesUpdated();
     }
   };

@@ -1,9 +1,9 @@
 import type { Account } from '../types/index.ts';
 import React, { useState } from 'react';
 import { Download, Upload, Trash2, Shield, Moon, Sun, Database, Sparkles, Fingerprint, KeyRound, Lock, Check, Landmark } from 'lucide-react';
-import { db, initDatabaseDefaults } from '../lib/db.ts';
+// db helpers
 import { parseGermanAmount } from '../lib/csvParser.ts';
-import { updateAccountSettings } from '../lib/api.ts';
+import { updateAccountSettings, exportProfileBackup, importProfileBackup, resetProfileData } from '../lib/api.ts';
 import { APP_VERSION, BUILD_DATE } from '../version.ts';
 import { getSecurityConfig, saveSecurityConfig, registerPasskey, isPasskeySupported, hashPin, type SecurityConfig } from '../lib/passkey.ts';
 
@@ -86,14 +86,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
   const handleExportBackup = async () => {
     setIsExporting(true);
     try {
-      const data = {
-        exportedAt: new Date().toISOString(),
-        transactions: await db.transactions.toArray(),
-        categories: await db.categories.toArray(),
-        rules: await db.rules.toArray(),
-        bankTemplates: await db.bankTemplates.toArray(),
-        accounts: await db.accounts.toArray(),
-      };
+      const data = await exportProfileBackup(profileId);
 
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -126,7 +119,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       const hasTemplates = Array.isArray(data.bankTemplates);
       const hasAccounts = Array.isArray(data.accounts);
 
-      if (!hasTxs && !hasCats && !hasRules && !hasAccounts) {
+      if (!hasTxs && !hasCats && !hasRules && !hasAccounts && !hasTemplates) {
         throw new Error('Die Backup-Datei enthält keine bekannten Dagobert-Daten.');
       }
 
@@ -176,31 +169,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
         }
       }
 
-      // 2. Atomic Replacement: All tables inside a single Dexie transaction!
-      await db.transaction('rw', [db.transactions, db.categories, db.rules, db.bankTemplates, db.accounts], async () => {
-        if (hasTxs) {
-          await db.transactions.clear();
-          await db.transactions.bulkAdd(data.transactions);
-        }
-        if (hasCats) {
-          await db.categories.clear();
-          await db.categories.bulkAdd(data.categories);
-        }
-        if (hasRules) {
-          await db.rules.clear();
-          await db.rules.bulkAdd(data.rules);
-        }
-        if (hasTemplates) {
-          await db.bankTemplates.clear();
-          await db.bankTemplates.bulkAdd(data.bankTemplates);
-        }
-        if (hasAccounts) {
-          await db.accounts.clear();
-          await db.accounts.bulkAdd(data.accounts);
-        }
-      });
-
-      alert('Backup erfolgreich wiederhergestellt!');
+      // Save directly to central SQLite database on server!
+      await importProfileBackup(profileId, data);
+      alert('Backup erfolgreich in die zentrale Datenbank übernommen!');
       onDataChanged();
     } catch (err: unknown) {
       alert(`Fehler beim Wiederherstellen: ${err instanceof Error ? err.message : 'Ungültige Datei'}`);
@@ -293,21 +264,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       }
     ];
 
-    await db.transactions.bulkAdd(sampleTxs);
+    await importProfileBackup(profileId, { transactions: sampleTxs });
     onDataChanged();
     alert('Demo-Daten erfolgreich eingefügt!');
   };
 
   const handleResetDatabase = async () => {
-    if (confirm('Wirklich ALLE Buchungen, Kategorien und Regeln löschen und zurücksetzen?')) {
-      await db.transactions.clear();
-      await db.categories.clear();
-      await db.rules.clear();
-      await db.bankTemplates.clear();
-      await db.accounts.clear();
-      await initDatabaseDefaults();
+    if (confirm('Wirklich ALLE Buchungen, Kategorien und Regeln in diesem Profil zurücksetzen?')) {
+      await resetProfileData(profileId);
       onDataChanged();
-      alert('Datenbank auf Werkseinstellungen zurückgesetzt.');
+      alert('Profil auf Werkseinstellungen zurückgesetzt.');
     }
   };
 
@@ -539,7 +505,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
           Dagobert v{APP_VERSION}
         </p>
         <p className="text-[11px]">
-          Build {BUILD_DATE} · Zentrale SQLite &amp; Multi-Profile aktiv
+          Build {BUILD_DATE} · Live-Sync &amp; Multi-Profile Hardened
         </p>
       </div>
     </div>

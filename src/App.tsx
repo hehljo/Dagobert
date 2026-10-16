@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Transaction, Category, CategoryRule, BankTemplate, Account, Profile } from './types/index.ts';
 import {
   fetchProfiles,
@@ -44,6 +44,7 @@ export function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [bankTemplates, setBankTemplates] = useState<BankTemplate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const activeLoadIdRef = useRef(0);
 
   // Load profiles
   const loadProfiles = useCallback(async () => {
@@ -60,11 +61,15 @@ export function App() {
     }
   }, []);
 
-  // Load data for active profile
+  // Load data for active profile with race-condition prevention
   const loadData = useCallback(async (profileId: string) => {
+    const loadId = ++activeLoadIdRef.current;
     setIsLoading(true);
     try {
       const data = await fetchProfileData(profileId);
+      // Discard stale responses if user switched profiles in between!
+      if (loadId !== activeLoadIdRef.current) return;
+
       setAccounts(data.accounts);
       setCategories(data.categories);
       setRules(data.rules);
@@ -73,7 +78,9 @@ export function App() {
     } catch (err) {
       console.error('Error fetching data:', err);
     } finally {
-      setIsLoading(false);
+      if (loadId === activeLoadIdRef.current) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
@@ -100,6 +107,29 @@ export function App() {
   }, [isDark]);
 
   const toggleDarkMode = () => setIsDark(prev => !prev);
+
+  // Multi-device live sync: auto-refresh when tab is focused, becomes visible, or on 15s interval
+  useEffect(() => {
+    if (!activeProfile) return;
+
+    const handleSync = () => {
+      if (!document.hidden && activeProfile) {
+        loadData(activeProfile.id);
+      }
+    };
+
+    window.addEventListener('focus', handleSync);
+    document.addEventListener('visibilitychange', handleSync);
+
+    const interval = setInterval(handleSync, 15000);
+
+    return () => {
+      window.removeEventListener('focus', handleSync);
+      document.removeEventListener('visibilitychange', handleSync);
+      clearInterval(interval);
+    };
+  }, [activeProfile, loadData]);
+
 
   // Switch profile handler
   const handleSelectProfile = (profile: Profile) => {

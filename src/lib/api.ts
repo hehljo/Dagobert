@@ -117,3 +117,34 @@ export async function deleteCategoryRule(id: string): Promise<void> {
   });
   if (!res.ok) throw new Error('Fehler beim Löschen der Regel');
 }
+
+export async function deleteCategoryRuleScoped(profileId: string, id: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/rules/${id}?profileId=${encodeURIComponent(profileId)}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) throw new Error('Fehler beim Löschen der Regel');
+}
+
+export async function exportProfileBackup(profileId: string): Promise<any> {
+  const res = await fetch(`${BASE_URL}/api/backup?profileId=${encodeURIComponent(profileId)}`);
+  if (!res.ok) throw new Error('Fehler beim Exportieren des Backups');
+  return res.json();
+}
+
+export async function importProfileBackup(profileId: string, data: any): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/backup/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profileId, data })
+  });
+  if (!res.ok) throw new Error('Fehler beim Wiederherstellen des Backups');
+}
+
+export async function resetProfileData(profileId: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/reset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profileId })
+  });
+  if (!res.ok) throw new Error('Fehler beim Zurücksetzen des Profils');
+}
