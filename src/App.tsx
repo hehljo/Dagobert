@@ -53,6 +53,7 @@ export function App() {
   const categories = useLiveQuery(() => db.categories.toArray()) || [];
   const rules = useLiveQuery(() => db.rules.toArray()) || [];
   const bankTemplates = useLiveQuery(() => db.bankTemplates.toArray()) || [];
+  const account = useLiveQuery(() => db.accounts.get('comdirect'));
 
   const handleOpenCategoryFilter = (catId: string) => {
     setSelectedCategoryFilter(catId);
@@ -101,6 +102,7 @@ export function App() {
           <Dashboard
             transactions={transactions}
             categories={categories}
+            account={account}
             selectedMonth={selectedMonth}
             onMonthChange={setSelectedMonth}
             onOpenImport={() => setIsImportOpen(true)}
@@ -129,6 +131,7 @@ export function App() {
 
         {activeTab === 'settings' && (
           <SettingsView
+            account={account}
             isDark={isDark}
             onToggleDark={() => setIsDark(!isDark)}
             onDataChanged={() => {}}

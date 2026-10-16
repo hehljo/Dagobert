@@ -1,11 +1,12 @@
 import Dexie, { type Table } from 'dexie';
-import type { Transaction, Category, CategoryRule, BankTemplate } from '../types/index.ts';
+import type { Transaction, Category, CategoryRule, BankTemplate, Account } from '../types/index.ts';
 
 export class DagobertDatabase extends Dexie {
   transactions!: Table<Transaction, number>;
   categories!: Table<Category, string>;
   rules!: Table<CategoryRule, string>;
   bankTemplates!: Table<BankTemplate, string>;
+  accounts!: Table<Account, string>;
 
   constructor() {
     super('DagobertDB');
@@ -15,10 +16,20 @@ export class DagobertDatabase extends Dexie {
       rules: 'id, priority, enabled',
       bankTemplates: 'id, name'
     });
+    this.version(2).stores({
+      accounts: 'id, name'
+    });
   }
 }
 
 export const db = new DagobertDatabase();
+
+export const DEFAULT_ACCOUNT: Account = {
+  id: 'comdirect',
+  name: 'comdirect Girokonto',
+  initialBalance: 0,
+  initialBalanceDate: '2026-01-01'
+};
 
 export const DEFAULT_CATEGORIES: Category[] = [
   { id: 'lebensmittel', name: 'Lebensmittel & Supermarkt', icon: 'ShoppingCart', color: '#30D158', type: 'expense' },
@@ -141,4 +152,30 @@ export async function initDatabaseDefaults() {
   if (ruleCount === 0) {
     await db.rules.bulkAdd(DEFAULT_RULES);
   }
+
+  const accountCount = await db.accounts.count();
+  if (accountCount === 0) {
+    await db.accounts.add(DEFAULT_ACCOUNT);
+  }
+}
+
+/**
+ * Calculates current real account balance.
+ * If a comdirect checkpoint (Neuer Kontostand) exists:
+ * current = checkpointBalance + sum(transactions where date > checkpointDate)
+ * Otherwise:
+ * current = initialBalance + sum(transactions where date >= initialBalanceDate)
+ */
+export function calculateRealAccountBalance(account: Account | undefined, txs: Transaction[]): number {
+  if (!account) return 0;
+
+  if (account.checkpointBalance !== undefined && account.checkpointDate) {
+    const afterCheckpoint = txs.filter(t => t.date > account.checkpointDate!);
+    const delta = afterCheckpoint.reduce((sum, t) => sum + t.amount, 0);
+    return account.checkpointBalance + delta;
+  }
+
+  const fromInitial = txs.filter(t => t.date >= account.initialBalanceDate);
+  const sum = fromInitial.reduce((sum, t) => sum + t.amount, 0);
+  return account.initialBalance + sum;
 }

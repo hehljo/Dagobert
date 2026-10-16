@@ -1,21 +1,38 @@
+import type { Account } from '../types/index.ts';
 import React, { useState } from 'react';
-import { Download, Upload, Trash2, Shield, Moon, Sun, Database, Sparkles, Fingerprint, KeyRound, Lock, Check } from 'lucide-react';
+import { Download, Upload, Trash2, Shield, Moon, Sun, Database, Sparkles, Fingerprint, KeyRound, Lock, Check, Landmark } from 'lucide-react';
 import { db, initDatabaseDefaults } from '../lib/db.ts';
 import { APP_VERSION, BUILD_DATE } from '../version.ts';
 import { getSecurityConfig, saveSecurityConfig, registerPasskey, isPasskeySupported, hashPin, type SecurityConfig } from '../lib/passkey.ts';
 
 interface SettingsViewProps {
+  account?: Account;
   isDark: boolean;
   onToggleDark: () => void;
   onDataChanged: () => void;
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark, onDataChanged }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark, onDataChanged, account }) => {
   const [isExporting, setIsExporting] = useState(false);
   const [security, setSecurity] = useState<SecurityConfig>(getSecurityConfig());
   const [pinInput, setPinInput] = useState('');
   const [showPinSetup, setShowPinSetup] = useState(false);
   const [secNotice, setSecNotice] = useState<string | null>(null);
+  const [initBalInput, setInitBalInput] = useState(account ? String(account.initialBalance) : '0');
+  const [initDateInput, setInitDateInput] = useState(account?.initialBalanceDate || '2026-01-01');
+
+  const handleSaveAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const val = parseFloat(initBalInput.replace(',', '.'));
+    if (isNaN(val)) return;
+
+    await db.accounts.update('comdirect', {
+      initialBalance: val,
+      initialBalanceDate: initDateInput
+    });
+    alert('Startsaldo erfolgreich gespeichert!');
+    onDataChanged();
+  };
 
   const handleToggleSecurity = async () => {
     if (security.enabled) {
@@ -339,6 +356,60 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
         )}
       </div>
 
+            {/* Account & Initial Balance Management */}
+      <div className="bg-white dark:bg-ios-darkCard rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
+        <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+          <Landmark className="w-4 h-4 text-ios-tint" />
+          <span>Konto &amp; Startsaldo</span>
+        </h3>
+
+        {account?.checkpointBalance !== undefined && (
+          <div className="p-3.5 bg-ios-tint/10 border border-ios-tint/20 rounded-2xl flex items-center justify-between text-xs">
+            <div>
+              <p className="font-semibold text-slate-900 dark:text-white">Automatischer comdirect-Stichtag</p>
+              <p className="text-ios-gray text-[11px]">Aus letztem CSV-Import ({account.checkpointDate})</p>
+            </div>
+            <span className="font-mono font-bold text-sm text-ios-tint">
+              {account.checkpointBalance.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
+            </span>
+          </div>
+        )}
+
+        <form onSubmit={handleSaveAccount} className="space-y-3 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="font-semibold text-ios-gray block mb-1">Manueller Startsaldo</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={initBalInput}
+                  onChange={(e) => setInitBalInput(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-100 dark:bg-neutral-800 rounded-xl outline-none font-mono text-sm"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-ios-gray font-semibold">€</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="font-semibold text-ios-gray block mb-1">Stichtag für Startsaldo</label>
+              <input
+                type="date"
+                value={initDateInput}
+                onChange={(e) => setInitDateInput(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-100 dark:bg-neutral-800 rounded-xl outline-none"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            className="px-4 py-2 bg-ios-tint text-white font-semibold rounded-xl text-xs shadow-sm hover:brightness-110 active:scale-95"
+          >
+            Startsaldo aktualisieren
+          </button>
+        </form>
+      </div>
+
       {/* Theme & Display */}
       <div className="bg-white dark:bg-ios-darkCard rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
         <h3 className="font-bold text-sm text-slate-900 dark:text-white">Darstellung</h3>
@@ -411,7 +482,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
           Dagobert v{APP_VERSION}
         </p>
         <p className="text-[11px]">
-          Build {BUILD_DATE} · App-Shell, PIN-Fix &amp; Viewport-Lock aktiv
+          Build {BUILD_DATE} · Echter Saldo &amp; comdirect-Stichtag aktiv
         </p>
       </div>
     </div>

@@ -4,7 +4,8 @@ import {
   parseGermanAmount,
   parseGermanDate,
   parseComdirectBuchungstext,
-  computeTransactionHash
+  computeTransactionHash,
+  extractComdirectMetadata
 } from '../lib/csvParser.ts';
 import { evaluateRules, createSuggestedRule } from '../lib/rulesEngine.ts';
 import { COMDIRECT_TEMPLATE, DEFAULT_RULES } from '../lib/db.ts';
@@ -85,5 +86,48 @@ describe('CSV Parser & comdirect specifics', () => {
     expect(rows[0].payee).toBe('Arbeitgeber GmbH');
     expect(rows[0].amount).toBe(3450.0);
     expect(rows[0].type).toBe('Übertrag / Überweisung');
+  });
+});
+
+describe('Account & Balance calculations', () => {
+  it('extracts comdirect metadata (dates, balances, IBAN)', () => {
+    const csvWithMeta = `
+"Umsätze Girokonto";"Zeitraum: 01.10.2026 - 15.10.2026";"Konto: DE12345678901234567890"
+"Alter Kontostand";"2.450,20 EUR"
+"Neuer Kontostand";"3.120,80 EUR"
+
+"Buchungstag";"Wertstellung (Valuta)";"Vorgang";"Buchungstext";"Umsatz in EUR"
+"15.10.2026";"15.10.2026";"Übertrag";"Gehalt";"500,00"
+`;
+
+    const meta = extractComdirectMetadata(csvWithMeta);
+    expect(meta.startDate).toBe('2026-10-01');
+    expect(meta.endDate).toBe('2026-10-15');
+    expect(meta.oldBalance).toBe(2450.20);
+    expect(meta.newBalance).toBe(3120.80);
+    expect(meta.iban).toBe('DE12345678901234567890');
+  });
+
+  it('calculates real balance based on comdirect checkpoint and future transactions', async () => {
+    const { calculateRealAccountBalance } = await import('../lib/db.ts');
+
+    const account = {
+      id: 'comdirect',
+      name: 'Girokonto',
+      initialBalance: 1000,
+      initialBalanceDate: '2026-01-01',
+      checkpointBalance: 3120.80,
+      checkpointDate: '2026-10-15'
+    };
+
+    const txs = [
+      { date: '2026-10-10', amount: -50, currency: 'EUR', payee: 'Old', purpose: '', rawText: '', type: '', category: '', account: '', importedAt: '', sourceHash: '' },
+      { date: '2026-10-16', amount: -20.80, currency: 'EUR', payee: 'New', purpose: '', rawText: '', type: '', category: '', account: '', importedAt: '', sourceHash: '' }
+    ];
+
+    // Transactions before or on 2026-10-15 are already part of 3.120,80 €!
+    // Transaction on 2026-10-16 (-20.80) should be subtracted -> 3.100,00 €!
+    const realBal = calculateRealAccountBalance(account, txs);
+    expect(realBal).toBe(3100.00);
   });
 });

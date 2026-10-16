@@ -1,11 +1,13 @@
 import React, { useMemo } from 'react';
-import { TrendingUp, TrendingDown, Wallet, ChevronLeft, ChevronRight, Upload, Sparkles } from 'lucide-react';
-import type { Transaction, Category } from '../types/index.ts';
+import { TrendingUp, TrendingDown, Wallet, ChevronLeft, ChevronRight, Upload, Sparkles, Landmark } from 'lucide-react';
+import type { Transaction, Category, Account } from '../types/index.ts';
 import { DonutChart, type DonutSlice } from './DonutChart.tsx';
+import { calculateRealAccountBalance } from '../lib/db.ts';
 
 interface DashboardProps {
   transactions: Transaction[];
   categories: Category[];
+  account?: Account;
   selectedMonth: string; // YYYY-MM
   onMonthChange: (month: string) => void;
   onOpenImport: () => void;
@@ -15,6 +17,7 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({
   transactions,
   categories,
+  account,
   selectedMonth,
   onMonthChange,
   onOpenImport,
@@ -25,12 +28,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return new Map(categories.map(c => [c.id, c]));
   }, [categories]);
 
+  // Real account balance
+  const realBalance = useMemo(() => {
+    return calculateRealAccountBalance(account, transactions);
+  }, [account, transactions]);
+
   // Filter transactions by selected month
   const monthTransactions = useMemo(() => {
     return transactions.filter(t => t.date.startsWith(selectedMonth));
   }, [transactions, selectedMonth]);
 
-  // Calculate totals
+  // Calculate monthly cashflow totals
   const { income, expense, balance, savingsRate } = useMemo(() => {
     let inc = 0;
     let exp = 0;
@@ -94,7 +102,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [selectedMonth]);
 
   return (
-    <div className="space-y-6 pb-24 max-w-5xl mx-auto px-4 pt-4">
+    <div className="space-y-6 pb-6 max-w-5xl mx-auto px-4 pt-4">
       {/* Month Switcher Bar */}
       <div className="flex items-center justify-between bg-white dark:bg-ios-darkCard rounded-2xl p-2 shadow-sm border border-ios-separator dark:border-ios-darkSeparator">
         <button
@@ -120,21 +128,32 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* Main KPI Cards Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {/* Net Cashflow / Saldo */}
-        <div className="col-span-2 bg-gradient-to-br from-slate-900 to-neutral-800 text-white rounded-3xl p-5 shadow-md relative overflow-hidden">
-          <div className="flex justify-between items-start">
-            <span className="text-xs uppercase font-semibold tracking-wider text-slate-400">Netto Cashflow</span>
-            <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
-              <Wallet className="w-4 h-4 text-ios-tint" />
-            </div>
+        {/* Real Account Balance Card */}
+        <div className="col-span-2 sm:col-span-1 bg-white dark:bg-ios-darkCard rounded-3xl p-4 shadow-sm border border-ios-separator dark:border-ios-darkSeparator">
+          <div className="flex items-center justify-between text-ios-gray mb-1">
+            <span className="text-xs font-semibold">Kontostand</span>
+            <Landmark className="w-4 h-4 text-ios-tint" />
           </div>
-          <div className="mt-3">
-            <div className={`text-2xl sm:text-3xl font-extrabold tracking-tight ${balance >= 0 ? 'text-ios-green' : 'text-ios-red'}`}>
+          <div className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+            {realBalance.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
+          </div>
+          <p className="text-[10px] text-ios-gray mt-1 truncate">
+            {account?.checkpointDate ? `per ${account.checkpointDate} (aus comdirect)` : 'aus Startsaldo'}
+          </p>
+        </div>
+
+        {/* Net Cashflow / Monatssaldo */}
+        <div className="col-span-2 sm:col-span-1 bg-gradient-to-br from-slate-900 to-neutral-800 text-white rounded-3xl p-4 shadow-sm relative overflow-hidden">
+          <div className="flex justify-between items-start text-xs font-semibold text-slate-400">
+            <span>Cashflow (Monat)</span>
+            <Wallet className="w-4 h-4 text-amber-300" />
+          </div>
+          <div className="mt-1">
+            <div className={`text-xl sm:text-2xl font-extrabold tracking-tight ${balance >= 0 ? 'text-ios-green' : 'text-ios-red'}`}>
               {balance >= 0 ? '+' : ''}{balance.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
             </div>
-            <p className="text-xs text-slate-300 mt-1 flex items-center gap-1">
-              <span>Sparquote:</span>
-              <span className="font-bold text-white">{savingsRate}%</span>
+            <p className="text-[10px] text-slate-300 mt-1">
+              Sparquote: <span className="font-bold text-white">{savingsRate}%</span>
             </p>
           </div>
         </div>
@@ -189,7 +208,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div>
             <h3 className="font-bold text-lg text-slate-900 dark:text-white">Noch keine Buchungen vorhanden</h3>
             <p className="text-sm text-ios-gray max-w-md mx-auto mt-1">
-              Lade deine comdirect CSV-Datei hoch. Umlaute (Windows-1252) und Buchungstexte werden automatisch erkannt und kategorisiert.
+              Lade deine comdirect CSV-Datei hoch. Umlaute (Windows-1252), Kontostände und Buchungstexte werden automatisch erkannt.
             </p>
           </div>
           <button

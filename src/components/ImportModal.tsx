@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { X, Upload, FileText, CheckCircle2, AlertCircle, ArrowRight } from 'lucide-react';
 import type { BankTemplate, Category, CategoryRule, ImportPreviewRow, Transaction } from '../types/index.ts';
-import { parseBankCsv, decodeFileWithEncoding } from '../lib/csvParser.ts';
+import { parseBankCsv, decodeFileWithEncoding, extractComdirectMetadata } from '../lib/csvParser.ts';
+import type { CsvMetadata } from '../types/index.ts';
 import { autoCategorizePreview } from '../lib/rulesEngine.ts';
 import { db } from '../lib/db.ts';
 
@@ -31,6 +32,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null);
 
   const selectedTemplate = bankTemplates.find(t => t.id === selectedTemplateId) || bankTemplates[0];
 
@@ -50,7 +52,11 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       const existingTxs = await db.transactions.toArray();
       const existingHashes = new Set(existingTxs.map(t => t.sourceHash));
 
-      // 3. Parse CSV
+      // 3. Extract balance metadata
+      const meta = extractComdirectMetadata(text);
+      setCsvMetadata(meta);
+
+      // 4. Parse CSV
       const rawParsed = parseBankCsv(text, selectedTemplate, existingHashes);
 
       // 4. Auto-categorize via rules
@@ -91,8 +97,18 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         sourceHash: row.sourceHash
       }));
 
-      // Atomic write inside Dexie transaction checking existing hashes
-      await db.transaction('rw', db.transactions, async () => {
+      // Atomic write inside Dexie transaction checking existing hashes and updating account balance
+      await db.transaction('rw', [db.transactions, db.accounts], async () => {
+        if (csvMetadata?.newBalance !== undefined && csvMetadata?.endDate) {
+          const acc = await db.accounts.get('comdirect');
+          if (acc) {
+            await db.accounts.update('comdirect', {
+              checkpointBalance: csvMetadata.newBalance,
+              checkpointDate: csvMetadata.endDate,
+              iban: csvMetadata.iban || acc.iban
+            });
+          }
+        }
         const existing = await db.transactions.toArray();
         const existingHashes = new Set(existing.map(t => t.sourceHash));
         const deduplicated = txs.filter(t => !existingHashes.has(t.sourceHash));
@@ -196,6 +212,17 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         {/* Preview Results Table */}
         {previewRows.length > 0 && (
           <div className="space-y-3">
+            {csvMetadata?.newBalance !== undefined && (
+              <div className="p-3 bg-ios-green/10 border border-ios-green/20 rounded-2xl flex items-center justify-between text-xs text-ios-green">
+                <span className="font-semibold">
+                  Echter Kontostand erkannt (per {csvMetadata.endDate || 'Stichtag'}):
+                </span>
+                <span className="font-mono font-bold text-sm">
+                  {csvMetadata.newBalance.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
+                </span>
+              </div>
+            )}
+
             <div className="flex items-center justify-between text-xs font-semibold px-1">
               <span className="text-slate-700 dark:text-slate-300">
                 Gefundene Buchungen ({fileName})

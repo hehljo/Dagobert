@@ -15,6 +15,25 @@ export interface Transaction {
   importedAt: string;
   sourceHash: string; // deterministic hash for deduplication
   isManual?: boolean;
+  status?: 'booked' | 'pending';
+}
+
+export interface Account {
+  id: string;
+  name: string;
+  iban?: string;
+  initialBalance: number;
+  initialBalanceDate: string; // YYYY-MM-DD
+  checkpointBalance?: number;
+  checkpointDate?: string; // YYYY-MM-DD
+}
+
+export interface CsvMetadata {
+  startDate?: string;
+  endDate?: string;
+  newBalance?: number;
+  oldBalance?: number;
+  iban?: string;
 }
 
 export interface Category {
@@ -72,4 +91,5 @@ export interface ImportPreviewRow {
   rawText: string;
   sourceHash: string;
   isDuplicate: boolean;
+  status: 'booked' | 'pending';
 }

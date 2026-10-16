@@ -229,6 +229,8 @@ export function parseBankCsv(
       purpose = rawText;
     }
 
+    const isPending = /vorgemerkt|offen/i.test(rawType);
+    const status: 'booked' | 'pending' = isPending ? 'pending' : 'booked';
     const sourceHash = computeTransactionHash(date, amount, rawText);
     const isDuplicate = existingHashes.has(sourceHash);
 
@@ -242,7 +244,8 @@ export function parseBankCsv(
       category: 'sonstiges',
       rawText,
       sourceHash,
-      isDuplicate
+      isDuplicate,
+      status
     });
   }
 
@@ -261,4 +264,40 @@ export async function decodeFileWithEncoding(file: File, encoding: string = 'win
     const decoder = new TextDecoder('utf-8');
     return decoder.decode(buffer);
   }
+}
+
+/**
+ * Extracts comdirect metadata headers/footers (Zeitraum, Alter/Neuer Kontostand, IBAN)
+ */
+export function extractComdirectMetadata(content: string): import('../types/index.ts').CsvMetadata {
+  const meta: import('../types/index.ts').CsvMetadata = {};
+
+  // Zeitraum: DD.MM.YYYY - DD.MM.YYYY
+  const zeitraumMatch = content.match(/Zeitraum:\s*(\d{2}\.\d{2}\.\d{4})\s*-\s*(\d{2}\.\d{2}\.\d{4})/i);
+  if (zeitraumMatch) {
+    meta.startDate = parseGermanDate(zeitraumMatch[1]) || undefined;
+    meta.endDate = parseGermanDate(zeitraumMatch[2]) || undefined;
+  }
+
+  // Neuer Kontostand
+  const neuerMatch = content.match(/Neuer Kontostand[";\s]+([0-9.,-]+)\s*(?:EUR|€)?/i);
+  if (neuerMatch) {
+    const val = parseGermanAmount(neuerMatch[1]);
+    if (val !== null) meta.newBalance = val;
+  }
+
+  // Alter Kontostand
+  const alterMatch = content.match(/Alter Kontostand[";\s]+([0-9.,-]+)\s*(?:EUR|€)?/i);
+  if (alterMatch) {
+    const val = parseGermanAmount(alterMatch[1]);
+    if (val !== null) meta.oldBalance = val;
+  }
+
+  // IBAN
+  const ibanMatch = content.match(/(?:Konto|IBAN)[":;\s]+([A-Z]{2}[0-9A-Z]{10,30})/i);
+  if (ibanMatch) {
+    meta.iban = ibanMatch[1];
+  }
+
+  return meta;
 }
