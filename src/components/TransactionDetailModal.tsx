@@ -26,7 +26,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
   const isNew = transaction.id === undefined;
 
   const [date, setDate] = useState(transaction.date);
-  const [amountInput, setAmountInput] = useState(String(Math.abs(transaction.amount)));
+  const [amountInput, setAmountInput] = useState(transaction.amount ? Math.abs(transaction.amount).toFixed(2).replace('.', ',') : '0,00');
   const [isExpense, setIsExpense] = useState(transaction.amount <= 0);
   const [selectedCat, setSelectedCat] = useState(transaction.category);
   const [createRule, setCreateRule] = useState(false);
@@ -35,7 +35,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
 
   useEffect(() => {
     setDate(transaction.date);
-    setAmountInput(String(Math.abs(transaction.amount)));
+    setAmountInput(transaction.amount ? Math.abs(transaction.amount).toFixed(2).replace('.', ',') : '0,00');
     setIsExpense(transaction.amount <= 0);
     setSelectedCat(transaction.category);
     setPayee(transaction.payee);

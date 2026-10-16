@@ -19,7 +19,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
   const [pinInput, setPinInput] = useState('');
   const [showPinSetup, setShowPinSetup] = useState(false);
   const [secNotice, setSecNotice] = useState<string | null>(null);
-  const [initBalInput, setInitBalInput] = useState(account ? String(account.initialBalance) : '0');
+  const [initBalInput, setInitBalInput] = useState(account ? account.initialBalance.toFixed(2).replace('.', ',') : '0,00');
   const [initDateInput, setInitDateInput] = useState(account?.initialBalanceDate || '2026-01-01');
 
   const handleSaveAccount = async (e: React.FormEvent) => {
@@ -69,12 +69,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
 
   const handleSavePin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (pinInput.length < 4) {
-      alert('PIN muss mindestens 4 Ziffern lang sein.');
+    const cleanPin = pinInput.trim();
+    if (cleanPin.length < 4) {
+      alert('PIN muss mindestens 4 Ziffern lang sein (keine reinen Leerzeichen).');
       return;
     }
 
-    const hashed = await hashPin(pinInput);
+    const hashed = await hashPin(cleanPin);
     const next: SecurityConfig = { enabled: true, type: 'pin', pinHash: hashed };
     saveSecurityConfig(next);
     setSecurity(next);
@@ -133,8 +134,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       // Deep validate every transaction record
       if (hasTxs) {
         for (const t of data.transactions) {
-          if (!t || typeof t !== 'object' || !t.date || typeof t.amount !== 'number' || typeof t.category !== 'string') {
-            throw new Error('Backup enthält unvollständige oder beschädigte Buchungsdatensätze.');
+          if (!t || typeof t !== 'object' || typeof t.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(t.date) || typeof t.amount !== 'number' || typeof t.category !== 'string') {
+            throw new Error('Backup enthält unvollständige oder beschädigte Buchungsdatensätze (z.B. ungültiges Datum).');
+          }
+        }
+      }
+
+      // Deep validate accounts
+      if (hasAccounts) {
+        for (const a of data.accounts) {
+          if (!a || typeof a !== 'object' || !a.id || !a.name || typeof a.initialBalance !== 'number' || typeof a.initialBalanceDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(a.initialBalanceDate)) {
+            throw new Error('Backup enthält unvollständige oder beschädigte Kontodatensätze.');
           }
         }
       }
@@ -511,9 +521,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
           Dagobert v{APP_VERSION}
         </p>
         <p className="text-[11px]">
-          Build {BUILD_DATE} · Hardened Engine &amp; Saldo-Schutz aktiv
+          Build {BUILD_DATE} · Fully Verified Engine &amp; Precision-Fix aktiv
         </p>
       </div>
     </div>
-  );
-};
+  );};

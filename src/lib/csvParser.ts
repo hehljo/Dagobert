@@ -17,20 +17,6 @@ export function computeTransactionHash(date: string, amount: number, rawText: st
 }
 
 /**
- * Legacy 32-bit hash fallback for compatibility with previously imported records
- */
-export function computeLegacyTransactionHash(date: string, amount: number, rawText: string): string {
-  const str = `${date}|${amount.toFixed(2)}|${rawText.trim()}`;
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0;
-  }
-  return 'tx_' + Math.abs(hash).toString(36);
-}
-
-/**
  * Validates whether YYYY-MM-DD represents a real calendar day (rejects 31.02.)
  */
 export function isValidCalendarDate(year: number, month: number, day: number): boolean {
@@ -67,17 +53,23 @@ export function parseGermanDate(dateStr: string): string | null {
 }
 
 /**
- * Parses German number string (e.g. "1.234,56" or "-12,99") to float.
+ * Parses amount string to float. Supports German comma notation ("1.234,56", "-45,99")
+ * AND JavaScript standard float notation ("12.34", "-1000.50").
  */
 export function parseGermanAmount(amountStr: string): number | null {
   if (!amountStr) return null;
-  const cleaned = amountStr
-    .replace(/€/g, '')
-    .replace(/\s+/g, '')
-    .replace(/\./g, '')
-    .replace(/,/g, '.');
+  const trimmed = amountStr.trim().replace(/€/g, '').replace(/\s+/g, '');
+  if (!trimmed) return null;
 
-  if (!cleaned || !/^-?\d+(\.\d+)?$/.test(cleaned)) {
+  // 1. If it's already a JS float string with dot and NO comma (e.g. "12.34" or "-1000.50")
+  if (/^-?\d+\.\d{1,4}$/.test(trimmed)) {
+    const num = parseFloat(trimmed);
+    return isNaN(num) ? null : num;
+  }
+
+  // 2. German notation: remove thousand-dots, convert comma to dot
+  const cleaned = trimmed.replace(/\./g, '').replace(/,/g, '.');
+  if (!/^-?\d+(\.\d+)?$/.test(cleaned)) {
     return null;
   }
 
@@ -96,7 +88,7 @@ export function parseComdirectBuchungstext(raw: string): { payee: string; purpos
   let purpose = '';
 
   const empfaengerMatch = text.match(
-    /(?:Empfänger|Zahlungsempfänger):\s*([^;]+?)(?=(?:\s+(?:Kto\/IBAN|IBAN|BIC|BLZ|Buchungstext|Ref\.|End-to-End-Ref|Mandat|Gläubiger-ID):|$))/i
+    /(?:Empfänger|Zahlungsempfänger):\s*([^;]+?)(?=(?:\s+(?:Kto\/IBAN|IBAN|BIC|BLZ|Buchungstext|Ref\.|End-to-End-Ref|Mandat|Gl��ubiger-ID):|$))/i
   );
   if (empfaengerMatch) {
     payee = empfaengerMatch[1].trim();
@@ -167,7 +159,7 @@ export function parseBankCsv(
 
   // Find header line
   let headerIndex = -1;
-  for (let i = 0; i < Math.min(lines.length, 15); i++) {
+  for (let i = 0; i < Math.min(lines.length, 25); i++) {
     if (lines[i].includes(template.headerIdentifier)) {
       headerIndex = i;
       break;
@@ -240,9 +232,7 @@ export function parseBankCsv(
     const status: 'booked' | 'pending' = isPending ? 'pending' : 'booked';
 
     const sourceHash = computeTransactionHash(date, amount, rawText);
-    const legacyHash = computeLegacyTransactionHash(date, amount, rawText);
-    // Deduplication check: check both modern 64-bit and legacy hash
-    const isDuplicate = existingHashes.has(sourceHash) || existingHashes.has(legacyHash);
+    const isDuplicate = existingHashes.has(sourceHash);
 
     rows.push({
       date,
@@ -264,19 +254,27 @@ export function parseBankCsv(
 
 /**
  * Extracts comdirect metadata headers/footers (Zeitraum, Alter/Neuer Kontostand, IBAN).
- * Strictly scans ONLY the first 12 lines (header) and last 6 lines (footer) to prevent
- * accidental false positives from transaction notes!
+ * Strictly scans ONLY pre-header lines (before the transaction table) and explicit
+ * footer lines starting with "Alter/Neuer Kontostand". Never scans transaction lines!
  */
 export function extractComdirectMetadata(content: string): CsvMetadata {
   const meta: CsvMetadata = {};
   const allLines = content.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
   if (allLines.length === 0) return meta;
 
-  const candidateLines = [
-    ...allLines.slice(0, 12),
-    ...allLines.slice(-6)
-  ];
-  const metadataBlock = candidateLines.join('\n');
+  let headerIndex = -1;
+  for (let i = 0; i < Math.min(allLines.length, 25); i++) {
+    if (allLines[i].includes('Buchungstag')) {
+      headerIndex = i;
+      break;
+    }
+  }
+
+  const preHeaderLines = headerIndex !== -1 ? allLines.slice(0, headerIndex) : allLines.slice(0, 10);
+  const footerLines = allLines.filter(l => /^"?Alter Kontostand|^"?Neuer Kontostand/i.test(l));
+
+  const metadataLines = [...preHeaderLines, ...footerLines];
+  const metadataBlock = metadataLines.join('\n');
 
   // Zeitraum: DD.MM.YYYY - DD.MM.YYYY
   const zeitraumMatch = metadataBlock.match(/Zeitraum:\s*(\d{1,2}\.\d{1,2}\.\d{4})\s*-\s*(\d{1,2}\.\d{1,2}\.\d{4})/i);
@@ -285,18 +283,28 @@ export function extractComdirectMetadata(content: string): CsvMetadata {
     meta.endDate = parseGermanDate(zeitraumMatch[2]) || undefined;
   }
 
-  // Neuer Kontostand (only in metadata lines)
-  const neuerMatch = metadataBlock.match(/Neuer Kontostand[":;\s]+([0-9.,-]+)\s*(?:EUR|€)?/i);
-  if (neuerMatch) {
-    const val = parseGermanAmount(neuerMatch[1]);
-    if (val !== null) meta.newBalance = val;
+  // Neuer Kontostand (strictly only if line starts with Neuer Kontostand)
+  for (const line of metadataLines) {
+    const m = line.match(/^"?(?:Neuer Kontostand)[":;\s]+([0-9.,-]+)\s*(?:EUR|€)?/i);
+    if (m) {
+      const val = parseGermanAmount(m[1]);
+      if (val !== null) {
+        meta.newBalance = val;
+        break;
+      }
+    }
   }
 
   // Alter Kontostand
-  const alterMatch = metadataBlock.match(/Alter Kontostand[":;\s]+([0-9.,-]+)\s*(?:EUR|€)?/i);
-  if (alterMatch) {
-    const val = parseGermanAmount(alterMatch[1]);
-    if (val !== null) meta.oldBalance = val;
+  for (const line of metadataLines) {
+    const m = line.match(/^"?(?:Alter Kontostand)[":;\s]+([0-9.,-]+)\s*(?:EUR|€)?/i);
+    if (m) {
+      const val = parseGermanAmount(m[1]);
+      if (val !== null) {
+        meta.oldBalance = val;
+        break;
+      }
+    }
   }
 
   // IBAN

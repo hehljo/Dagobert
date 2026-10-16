@@ -76,8 +76,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
     try {
       const toImport = previewRows.filter(r => !r.isDuplicate);
-      if (toImport.length === 0) {
-        alert('Keine neuen Buchungen zum Importieren vorhanden.');
+      if (toImport.length === 0 && csvMetadata?.newBalance === undefined) {
+        alert('Keine neuen Buchungen oder Kontostände zum Aktualisieren vorhanden.');
         return;
       }
 
@@ -98,13 +98,12 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         status: row.status // PRESERVE STATUS!
       }));
 
-      // Atomic write inside Dexie transaction checking existing hashes and updating account balance
+      // Atomic write inside Dexie transaction checking existing hashes, upgrading pending, and updating account balance
       await db.transaction('rw', [db.transactions, db.accounts], async () => {
+        // 1. Update Account checkpoint if newer
         if (csvMetadata?.newBalance !== undefined && csvMetadata?.endDate) {
           const acc = await db.accounts.get('comdirect');
           if (acc) {
-            // ONLY update checkpoint if CSV is newer or equal to current checkpoint!
-            // Older CSVs (e.g. importing September after October) must NOT overwrite the October anchor!
             if (!acc.checkpointDate || csvMetadata.endDate >= acc.checkpointDate) {
               await db.accounts.update('comdirect', {
                 checkpointBalance: csvMetadata.newBalance,
@@ -114,9 +113,38 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             }
           }
         }
+
+        // 2. Check existing transactions: promote pending to booked if newly booked!
         const existing = await db.transactions.toArray();
+        const pendingMap = new Map<string, Transaction>();
+        existing.forEach(t => {
+          if (t.status === 'pending') {
+            pendingMap.set(`${t.date}|${t.amount.toFixed(2)}|${t.payee.toLowerCase()}`, t);
+          }
+        });
+
         const existingHashes = new Set(existing.map(t => t.sourceHash));
-        const deduplicated = txs.filter(t => !existingHashes.has(t.sourceHash));
+        const deduplicated: Transaction[] = [];
+
+        for (const t of txs) {
+          const pendingKey = `${t.date}|${t.amount.toFixed(2)}|${t.payee.toLowerCase()}`;
+          const existingPending = pendingMap.get(pendingKey);
+
+          if (existingPending && existingPending.id !== undefined && t.status === 'booked') {
+            // Promote existing pending transaction to booked!
+            await db.transactions.update(existingPending.id, {
+              status: 'booked',
+              rawText: t.rawText,
+              type: t.type,
+              sourceHash: t.sourceHash
+            });
+            existingHashes.add(t.sourceHash);
+          } else if (!existingHashes.has(t.sourceHash)) {
+            deduplicated.push(t);
+            existingHashes.add(t.sourceHash);
+          }
+        }
+
         if (deduplicated.length > 0) {
           await db.transactions.bulkAdd(deduplicated);
         }
