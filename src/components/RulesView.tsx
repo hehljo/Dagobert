@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
 import { Plus, Sparkles, Trash2, Play, Check } from 'lucide-react';
-import type { CategoryRule, Category } from '../types/index.ts';
+import type { CategoryRule, Category, Transaction } from '../types/index.ts';
 import { evaluateRules } from '../lib/rulesEngine.ts';
-import { db } from '../lib/db.ts';
+import { createCategoryRule, deleteCategoryRule, updateExistingTransaction } from '../lib/api.ts';
 import { CategoryIcon } from './CategoryIcon.tsx';
 
 interface RulesViewProps {
+  profileId?: string;
   rules: CategoryRule[];
   categories: Category[];
+  transactions: Transaction[];
   onRulesUpdated: () => void;
 }
 
-export const RulesView: React.FC<RulesViewProps> = ({ rules, categories, onRulesUpdated }) => {
+export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rules, categories, transactions, onRulesUpdated }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [name, setName] = useState('');
   const [field, setField] = useState<'payee' | 'purpose' | 'rawText' | 'type'>('rawText');
@@ -37,7 +39,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ rules, categories, onRules
       enabled: true
     };
 
-    await db.rules.add(newRule);
+    await createCategoryRule(profileId, newRule);
     setIsCreating(false);
     setName('');
     setValue('');
@@ -45,13 +47,13 @@ export const RulesView: React.FC<RulesViewProps> = ({ rules, categories, onRules
   };
 
   const handleToggleRule = async (rule: CategoryRule) => {
-    await db.rules.update(rule.id, { enabled: !rule.enabled });
+    await createCategoryRule(profileId, { ...rule, enabled: !rule.enabled });
     onRulesUpdated();
   };
 
   const handleDeleteRule = async (id: string) => {
     if (confirm('Regel wirklich löschen?')) {
-      await db.rules.delete(id);
+      await deleteCategoryRule(id);
       onRulesUpdated();
     }
   };
@@ -59,14 +61,11 @@ export const RulesView: React.FC<RulesViewProps> = ({ rules, categories, onRules
   const handleApplyRulesToExisting = async () => {
     setIsApplying(true);
     try {
-      const allRules = await db.rules.toArray();
-      const allTxs = await db.transactions.toArray();
-
       let updatedCount = 0;
-      for (const tx of allTxs) {
-        const { category } = evaluateRules(tx, allRules);
-        if (category && category !== tx.category) {
-          await db.transactions.update(tx.id!, { category });
+      for (const tx of transactions) {
+        const { category } = evaluateRules(tx, rules);
+        if (category && category !== tx.category && tx.id !== undefined) {
+          await updateExistingTransaction(tx.id, { category });
           updatedCount++;
         }
       }

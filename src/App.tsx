@@ -1,7 +1,12 @@
-import { useState, useEffect } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, initDatabaseDefaults } from './lib/db.ts';
-import type { Transaction } from './types/index.ts';
+import { useState, useEffect, useCallback } from 'react';
+import type { Transaction, Category, CategoryRule, BankTemplate, Account, Profile } from './types/index.ts';
+import {
+  fetchProfiles,
+  fetchProfileData,
+  createManualTransaction,
+  updateExistingTransaction,
+  deleteExistingTransaction
+} from './lib/api.ts';
 import { Navbar } from './components/Navbar.tsx';
 import { BottomNav, type NavTab } from './components/BottomNav.tsx';
 import { Dashboard } from './components/Dashboard.tsx';
@@ -10,58 +15,100 @@ import { RulesView } from './components/RulesView.tsx';
 import { SettingsView } from './components/SettingsView.tsx';
 import { ImportModal } from './components/ImportModal.tsx';
 import { TransactionDetailModal } from './components/TransactionDetailModal.tsx';
-import { LockScreen } from './components/LockScreen.tsx';
-import { getSecurityConfig } from './lib/passkey.ts';
+import { ProfileModal } from './components/ProfileModal.tsx';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
-  const [isDark, setIsDark] = useState(true);
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    return localStorage.getItem('dagobert_theme') === 'dark' ||
+      (!localStorage.getItem('dagobert_theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  });
+
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string | null>(null);
 
-  // App Lock State
-  const [isLocked, setIsLocked] = useState(() => {
-    const sec = getSecurityConfig();
-    return sec.enabled;
+  // Month navigation (YYYY-MM)
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
 
-  // Initialize selected month to current (e.g. 2026-10)
-  const [selectedMonth, setSelectedMonth] = useState(() => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    return `${y}-${m}`;
-  });
+  // Server state
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [rules, setRules] = useState<CategoryRule[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [bankTemplates, setBankTemplates] = useState<BankTemplate[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Load profiles
+  const loadProfiles = useCallback(async () => {
+    try {
+      const list = await fetchProfiles();
+      setProfiles(list);
+      const savedId = localStorage.getItem('dagobert_active_profile_id');
+      const matched = list.find(p => p.id === savedId) || list.find(p => p.isDefault) || list[0];
+      if (matched) {
+        setActiveProfile(matched);
+      }
+    } catch {
+      // Fallback
+    }
+  }, []);
+
+  // Load data for active profile
+  const loadData = useCallback(async (profileId: string) => {
+    setIsLoading(true);
+    try {
+      const data = await fetchProfileData(profileId);
+      setAccounts(data.accounts);
+      setCategories(data.categories);
+      setRules(data.rules);
+      setTransactions(data.transactions);
+      setBankTemplates(data.bankTemplates);
+    } catch (err) {
+      console.error('Error fetching data:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadProfiles();
+  }, [loadProfiles]);
+
+  useEffect(() => {
+    if (activeProfile) {
+      localStorage.setItem('dagobert_active_profile_id', activeProfile.id);
+      loadData(activeProfile.id);
+    }
+  }, [activeProfile, loadData]);
 
   // Dark mode effect
   useEffect(() => {
     if (isDark) {
       document.documentElement.classList.add('dark');
+      localStorage.setItem('dagobert_theme', 'dark');
     } else {
       document.documentElement.classList.remove('dark');
+      localStorage.setItem('dagobert_theme', 'light');
     }
   }, [isDark]);
 
-  // Init DB defaults once
-  useEffect(() => {
-    initDatabaseDefaults();
-  }, []);
+  const toggleDarkMode = () => setIsDark(prev => !prev);
 
-  // Live query data from IndexedDB
-  const transactions = useLiveQuery(() => db.transactions.toArray()) || [];
-  const categories = useLiveQuery(() => db.categories.toArray()) || [];
-  const rules = useLiveQuery(() => db.rules.toArray()) || [];
-  const bankTemplates = useLiveQuery(() => db.bankTemplates.toArray()) || [];
-  const account = useLiveQuery(() => db.accounts.get('comdirect'));
-
-  const handleOpenCategoryFilter = (catId: string) => {
-    setSelectedCategoryFilter(catId);
-    setActiveTab('transactions');
+  // Switch profile handler
+  const handleSelectProfile = (profile: Profile) => {
+    setActiveProfile(profile);
+    setSelectedCategoryFilter(null);
   };
 
+  // Open draft for new manual entry
   const handleOpenNewManual = () => {
-    // Uncommitted in-memory draft - NOT added to DB until user confirms!
     const draftTx: Transaction = {
       date: new Date().toISOString().slice(0, 10),
       amount: -10.00,
@@ -71,46 +118,51 @@ export function App() {
       rawText: 'Manuelle Buchung',
       type: 'Barzahlung',
       category: 'sonstiges',
-      account: 'Manuell',
+      account: accounts[0]?.name || 'Girokonto',
       importedAt: new Date().toISOString(),
       sourceHash: 'man_' + Date.now(),
       isManual: true,
+      status: 'booked'
     };
     setSelectedTx(draftTx);
   };
 
-  // Render LockScreen if app is locked
-  if (isLocked) {
-    return <LockScreen onUnlock={() => setIsLocked(false)} />;
-  }
+  const activeAccount = accounts[0];
 
   return (
-    <div className="h-[100dvh] max-h-[100dvh] w-full flex flex-col overflow-hidden bg-ios-bg dark:bg-ios-darkBg transition-colors select-none">
-      {/* Top Bar (Docked at top, covers Notch) */}
-      <div className="flex-shrink-0">
-        <Navbar
-          onOpenImport={() => setIsImportOpen(true)}
-          onOpenNewManual={handleOpenNewManual}
-          isDark={isDark}
-          onToggleDark={() => setIsDark(!isDark)}
-        />
-      </div>
+    <div className="h-[100dvh] flex flex-col bg-slate-50 dark:bg-black text-slate-900 dark:text-white transition-colors duration-200 overflow-hidden select-none">
+      {/* Top Header Navbar */}
+      <Navbar
+        activeProfile={activeProfile || undefined}
+        onOpenImport={() => setIsImportOpen(true)}
+        onOpenNewManual={handleOpenNewManual}
+        onOpenProfiles={() => setIsProfileModalOpen(true)}
+      />
 
-      {/* Main Content Area (Independent scroll container with iOS momentum) */}
-      <main className="flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain pb-6">
-        {activeTab === 'dashboard' && (
+      {/* Main Content Area */}
+      <main className="flex-1 overflow-y-auto overscroll-contain pb-24 touch-pan-y">
+        {isLoading && (
+          <div className="text-center py-12 text-xs text-ios-gray">
+            Daten werden geladen...
+          </div>
+        )}
+
+        {!isLoading && activeTab === 'dashboard' && (
           <Dashboard
             transactions={transactions}
             categories={categories}
-            account={account}
+            account={activeAccount}
             selectedMonth={selectedMonth}
             onMonthChange={setSelectedMonth}
             onOpenImport={() => setIsImportOpen(true)}
-            onSelectCategoryFilter={handleOpenCategoryFilter}
+            onSelectCategoryFilter={(catId) => {
+              setSelectedCategoryFilter(catId);
+              setActiveTab('transactions');
+            }}
           />
         )}
 
-        {activeTab === 'transactions' && (
+        {!isLoading && activeTab === 'transactions' && (
           <TransactionsView
             transactions={transactions}
             categories={categories}
@@ -121,58 +173,82 @@ export function App() {
           />
         )}
 
-        {activeTab === 'rules' && (
+        {!isLoading && activeTab === 'rules' && (
           <RulesView
+            profileId={activeProfile?.id || 'privat'}
             rules={rules}
             categories={categories}
-            onRulesUpdated={() => {}}
+            transactions={transactions}
+            onRulesUpdated={() => {
+              if (activeProfile) loadData(activeProfile.id);
+            }}
           />
         )}
 
-        {activeTab === 'settings' && (
+        {!isLoading && activeTab === 'settings' && (
           <SettingsView
-            account={account}
+            profileId={activeProfile?.id || 'privat'}
+            account={activeAccount}
             isDark={isDark}
-            onToggleDark={() => setIsDark(!isDark)}
-            onDataChanged={() => {}}
+            onToggleDark={toggleDarkMode}
+            onDataChanged={() => {
+              if (activeProfile) loadData(activeProfile.id);
+            }}
           />
         )}
       </main>
 
-      {/* iOS Bottom Bar (Docked firmly at bottom, immune to page scrolling) */}
+      {/* Fixed Ergonomic Bottom Navigation Bar */}
       <BottomNav
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        txCount={transactions.length}
       />
 
-      {/* Import Modal */}
+      {/* Profile Management Modal */}
+      <ProfileModal
+        isOpen={isProfileModalOpen}
+        profiles={profiles}
+        activeProfileId={activeProfile?.id || 'privat'}
+        onClose={() => setIsProfileModalOpen(false)}
+        onSelectProfile={handleSelectProfile}
+        onProfilesChanged={loadProfiles}
+      />
+
+      {/* comdirect CSV Import Modal */}
       <ImportModal
         isOpen={isImportOpen}
+        profileId={activeProfile?.id || 'privat'}
+        existingTransactions={transactions}
         onClose={() => setIsImportOpen(false)}
         bankTemplates={bankTemplates}
         categories={categories}
         rules={rules}
         onImportComplete={(count) => {
-          alert(`Erfolgreich! ${count} neue Buchungen importiert.`);
+          alert(`Erfolgreich! ${count} Buchungen synchronisiert.`);
+          if (activeProfile) loadData(activeProfile.id);
           setActiveTab('dashboard');
         }}
       />
 
       {/* Transaction Detail & Edit Modal */}
       <TransactionDetailModal
+        profileId={activeProfile?.id || 'privat'}
         transaction={selectedTx}
         categories={categories}
         onClose={() => setSelectedTx(null)}
         onSave={async (tx) => {
+          if (!activeProfile) return;
           if (tx.id !== undefined) {
-            await db.transactions.put(tx);
+            await updateExistingTransaction(tx.id, tx);
           } else {
-            await db.transactions.add(tx);
+            await createManualTransaction(activeProfile.id, tx);
           }
+          await loadData(activeProfile.id);
         }}
         onDelete={async (id) => {
-          await db.transactions.delete(id);
+          if (!activeProfile) return;
+          await deleteExistingTransaction(id);
+          await loadData(activeProfile.id);
         }}
       />
     </div>

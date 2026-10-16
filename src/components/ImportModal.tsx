@@ -4,10 +4,12 @@ import type { BankTemplate, Category, CategoryRule, ImportPreviewRow, Transactio
 import { parseBankCsv, decodeFileWithEncoding, extractComdirectMetadata } from '../lib/csvParser.ts';
 import type { CsvMetadata } from '../types/index.ts';
 import { autoCategorizePreview } from '../lib/rulesEngine.ts';
-import { db } from '../lib/db.ts';
+import { batchImportTransactions } from '../lib/api.ts';
 
 interface ImportModalProps {
   isOpen: boolean;
+  profileId: string;
+  existingTransactions: Transaction[];
   onClose: () => void;
   bankTemplates: BankTemplate[];
   categories: Category[];
@@ -17,6 +19,8 @@ interface ImportModalProps {
 
 export const ImportModal: React.FC<ImportModalProps> = ({
   isOpen,
+  profileId,
+  existingTransactions,
   onClose,
   bankTemplates,
   categories,
@@ -49,8 +53,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       const text = await decodeFileWithEncoding(file, encoding);
 
       // 2. Fetch existing hashes to prevent duplicates
-      const existingTxs = await db.transactions.toArray();
-      const existingHashes = new Set(existingTxs.map(t => t.sourceHash));
+      const existingTxs = existingTransactions;
+      const existingHashes = new Set<string>(existingTxs.map(t => t.sourceHash));
 
       // 3. Extract balance metadata
       const meta = extractComdirectMetadata(text);
@@ -59,18 +63,25 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       // 4. Parse CSV
       const rawParsed = parseBankCsv(text, selectedTemplate, existingHashes);
 
-      // 5. Detect pending promotions (Vorgemerkt in DB -> Jetzt Gebucht in CSV)
-      const pendingTxs = existingTxs.filter(t => t.status === 'pending');
+      // 5. Detect pending promotions with queue (Vorgemerkt in DB -> Jetzt Gebucht in CSV)
+      const pendingMap = new Map<string, Transaction[]>();
+      existingTxs.forEach(t => {
+        if (t.status === 'pending') {
+          const key = `${t.date}|${t.amount.toFixed(2)}|${t.payee.trim().toLowerCase()}`;
+          const list = pendingMap.get(key) || [];
+          list.push(t);
+          pendingMap.set(key, list);
+        }
+      });
+
       for (const row of rawParsed) {
         if (row.status === 'booked') {
-          const matchPending = pendingTxs.find(t =>
-            t.date === row.date &&
-            Math.abs(t.amount - row.amount) < 0.001 &&
-            t.payee.trim().toLowerCase() === row.payee.trim().toLowerCase()
-          );
-          if (matchPending) {
+          const key = `${row.date}|${row.amount.toFixed(2)}|${row.payee.trim().toLowerCase()}`;
+          const pendingList = pendingMap.get(key);
+          if (pendingList && pendingList.length > 0) {
             row.isPendingPromotion = true;
             row.isDuplicate = false; // NOT a duplicate, it's an update!
+            pendingList.shift(); // consume one pending slot
           }
         }
       }
@@ -114,59 +125,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         status: row.status // PRESERVE STATUS!
       }));
 
-      // Atomic write inside Dexie transaction checking existing hashes, upgrading pending, and updating account balance
-      await db.transaction('rw', [db.transactions, db.accounts], async () => {
-        // 1. Update Account checkpoint if newer
-        if (csvMetadata?.newBalance !== undefined && csvMetadata?.endDate) {
-          const acc = await db.accounts.get('comdirect');
-          if (acc) {
-            if (!acc.checkpointDate || csvMetadata.endDate >= acc.checkpointDate) {
-              await db.accounts.update('comdirect', {
-                checkpointBalance: csvMetadata.newBalance,
-                checkpointDate: csvMetadata.endDate,
-                iban: csvMetadata.iban || acc.iban
-              });
-            }
-          }
-        }
-
-        // 2. Check existing transactions: promote pending to booked if newly booked!
-        const existing = await db.transactions.toArray();
-        const pendingMap = new Map<string, Transaction>();
-        existing.forEach(t => {
-          if (t.status === 'pending') {
-            pendingMap.set(`${t.date}|${t.amount.toFixed(2)}|${t.payee.toLowerCase()}`, t);
-          }
-        });
-
-        const existingHashes = new Set(existing.map(t => t.sourceHash));
-        const deduplicated: Transaction[] = [];
-
-        for (const t of txs) {
-          const pendingKey = `${t.date}|${t.amount.toFixed(2)}|${t.payee.toLowerCase()}`;
-          const existingPending = pendingMap.get(pendingKey);
-
-          if (existingPending && existingPending.id !== undefined && t.status === 'booked') {
-            // Promote existing pending transaction to booked!
-            await db.transactions.update(existingPending.id, {
-              status: 'booked',
-              rawText: t.rawText,
-              type: t.type,
-              sourceHash: t.sourceHash
-            });
-            existingHashes.add(t.sourceHash);
-          } else if (!existingHashes.has(t.sourceHash)) {
-            deduplicated.push(t);
-            existingHashes.add(t.sourceHash);
-          }
-        }
-
-        if (deduplicated.length > 0) {
-          await db.transactions.bulkAdd(deduplicated);
-        }
-      });
-
-      onImportComplete(txs.length);
+      const result = await batchImportTransactions(profileId, txs, csvMetadata || undefined);
+      onImportComplete(result.inserted + result.updated);
       onClose();
     } finally {
       setIsCommitting(false);

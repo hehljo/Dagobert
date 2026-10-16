@@ -3,10 +3,11 @@ import { X, Trash2, Sparkles, Check } from 'lucide-react';
 import type { Transaction, Category } from '../types/index.ts';
 import { createSuggestedRule } from '../lib/rulesEngine.ts';
 import { parseGermanAmount } from '../lib/csvParser.ts';
-import { db } from '../lib/db.ts';
+import { createCategoryRule } from '../lib/api.ts';
 import { CategoryIcon } from './CategoryIcon.tsx';
 
 interface TransactionDetailModalProps {
+  profileId?: string;
   transaction: Transaction | null;
   categories: Category[];
   onClose: () => void;
@@ -15,6 +16,7 @@ interface TransactionDetailModalProps {
 }
 
 export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
+  profileId = 'privat',
   transaction,
   categories,
   onClose,
@@ -70,7 +72,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
     if (createRule && selectedCat !== transaction.category) {
       const newRule = createSuggestedRule(updated, selectedCat);
       if (newRule) {
-        await db.rules.add(newRule);
+        await createCategoryRule(profileId, newRule);
       }
     }
 

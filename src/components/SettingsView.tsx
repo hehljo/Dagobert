@@ -3,17 +3,19 @@ import React, { useState } from 'react';
 import { Download, Upload, Trash2, Shield, Moon, Sun, Database, Sparkles, Fingerprint, KeyRound, Lock, Check, Landmark } from 'lucide-react';
 import { db, initDatabaseDefaults } from '../lib/db.ts';
 import { parseGermanAmount } from '../lib/csvParser.ts';
+import { updateAccountSettings } from '../lib/api.ts';
 import { APP_VERSION, BUILD_DATE } from '../version.ts';
 import { getSecurityConfig, saveSecurityConfig, registerPasskey, isPasskeySupported, hashPin, type SecurityConfig } from '../lib/passkey.ts';
 
 interface SettingsViewProps {
+  profileId?: string;
   account?: Account;
   isDark: boolean;
   onToggleDark: () => void;
   onDataChanged: () => void;
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark, onDataChanged, account }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark, onDataChanged, account, profileId = 'privat' }) => {
   const [isExporting, setIsExporting] = useState(false);
   const [security, setSecurity] = useState<SecurityConfig>(getSecurityConfig());
   const [pinInput, setPinInput] = useState('');
@@ -30,10 +32,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       return;
     }
 
-    await db.accounts.update('comdirect', {
-      initialBalance: val,
-      initialBalanceDate: initDateInput
-    });
+    await updateAccountSettings(profileId, 'comdirect', val, initDateInput);
     alert('Startsaldo erfolgreich gespeichert!');
     onDataChanged();
   };
@@ -540,7 +539,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
           Dagobert v{APP_VERSION}
         </p>
         <p className="text-[11px]">
-          Build {BUILD_DATE} · Fully Verified Engine (Final Pass)
+          Build {BUILD_DATE} · Zentrale SQLite &amp; Multi-Profile aktiv
         </p>
       </div>
     </div>

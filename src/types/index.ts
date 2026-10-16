@@ -1,3 +1,13 @@
+export interface Profile {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  isDefault: boolean;
+  hasPin: boolean;
+  createdAt?: string;
+}
+
 export interface Transaction {
   id?: number;
   date: string; // YYYY-MM-DD

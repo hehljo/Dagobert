@@ -2,8 +2,13 @@ version: '3.8'
 
 services:
   dagobert:
-    build: .
+    image: dagobert:latest
     container_name: dagobert
     restart: unless-stopped
     ports:
-      - "5052:80"
+      - "5052:5052"
+    volumes:
+      - /volume1/docker/dagobert/data:/app/data
+    environment:
+      - PORT=5052
+      - DATA_DIR=/app/data

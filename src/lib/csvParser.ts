@@ -15,6 +15,20 @@ export function computeTransactionHash(date: string, amount: number, rawText: st
   }
   return `tx_${hash.toString(16).padStart(16, '0')}`;
 }
+/**
+ * Legacy 32-bit hash fallback for deduplication of older records
+ */
+export function computeLegacyTransactionHash(date: string, amount: number, rawText: string): string {
+  const str = `${date}|${amount.toFixed(2)}|${rawText.trim()}`;
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash |= 0;
+  }
+  return 'tx_' + Math.abs(hash).toString(36);
+}
+
 
 /**
  * Validates whether YYYY-MM-DD represents a real calendar day (rejects 31.02.)
@@ -88,7 +102,7 @@ export function parseComdirectBuchungstext(raw: string): { payee: string; purpos
   let purpose = '';
 
   const empfaengerMatch = text.match(
-    /(?:Empfänger|Zahlungsempfänger):\s*([^;]+?)(?=(?:\s+(?:Kto\/IBAN|IBAN|BIC|BLZ|Buchungstext|Ref\.|End-to-End-Ref|Mandat|Gl��ubiger-ID):|$))/i
+    /(?:Empfänger|Zahlungsempfänger):\s*([^;]+?)(?=(?:\s+(?:Kto\/IBAN|IBAN|BIC|BLZ|Buchungstext|Ref\.?|End-to-End-Ref\.?|Mandat|Gläubiger-ID|Glaeubiger-ID)(?::|\s)|$))/i
   );
   if (empfaengerMatch) {
     payee = empfaengerMatch[1].trim();
@@ -96,7 +110,7 @@ export function parseComdirectBuchungstext(raw: string): { payee: string; purpos
 
   if (!payee) {
     const auftraggeberMatch = text.match(
-      /Auftraggeber:\s*([^;]+?)(?=(?:\s+(?:Kto\/IBAN|IBAN|BIC|BLZ|Buchungstext|Ref\.|End-to-End-Ref):|$))/i
+      /Auftraggeber:\s*([^;]+?)(?=(?:\s+(?:Kto\/IBAN|IBAN|BIC|BLZ|Buchungstext|Ref\.?|End-to-End-Ref\.?|Mandat|Gläubiger-ID|Glaeubiger-ID)(?::|\s)|$))/i
     );
     if (auftraggeberMatch) {
       payee = auftraggeberMatch[1].trim();
@@ -232,7 +246,8 @@ export function parseBankCsv(
     const status: 'booked' | 'pending' = isPending ? 'pending' : 'booked';
 
     const sourceHash = computeTransactionHash(date, amount, rawText);
-    const isDuplicate = existingHashes.has(sourceHash);
+    const legacyHash = computeLegacyTransactionHash(date, amount, rawText);
+    const isDuplicate = existingHashes.has(sourceHash) || existingHashes.has(legacyHash);
 
     rows.push({
       date,
