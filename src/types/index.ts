@@ -91,5 +91,6 @@ export interface ImportPreviewRow {
   rawText: string;
   sourceHash: string;
   isDuplicate: boolean;
+  isPendingPromotion?: boolean;
   status: 'booked' | 'pending';
 }

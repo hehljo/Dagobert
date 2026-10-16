@@ -134,17 +134,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       // Deep validate every transaction record
       if (hasTxs) {
         for (const t of data.transactions) {
-          if (!t || typeof t !== 'object' || typeof t.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(t.date) || typeof t.amount !== 'number' || typeof t.category !== 'string') {
-            throw new Error('Backup enthält unvollständige oder beschädigte Buchungsdatensätze (z.B. ungültiges Datum).');
+          if (!t || typeof t !== 'object') {
+            throw new Error('Backup enthält ungültige Buchungsobjekte.');
+          }
+          if (typeof t.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(t.date)) {
+            throw new Error(`Backup enthält Buchung mit ungültigem Datum: ${t.date}`);
+          }
+          if (typeof t.amount !== 'number' || isNaN(t.amount)) {
+            throw new Error('Backup enthält Buchung mit ungültigem Betrag.');
+          }
+          if (typeof t.category !== 'string' || !t.category) {
+            throw new Error('Backup enthält Buchung ohne Kategorie.');
+          }
+          // Ensure payee is a valid string to prevent toLowerCase crashes
+          if (typeof t.payee !== 'string') {
+            t.payee = 'Unbekannt';
           }
         }
       }
 
-      // Deep validate accounts
+      // Deep validate accounts (strictly check checkpointBalance is number if present)
       if (hasAccounts) {
         for (const a of data.accounts) {
-          if (!a || typeof a !== 'object' || !a.id || !a.name || typeof a.initialBalance !== 'number' || typeof a.initialBalanceDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(a.initialBalanceDate)) {
+          if (!a || typeof a !== 'object' || !a.id || !a.name || typeof a.initialBalance !== 'number' || isNaN(a.initialBalance) || typeof a.initialBalanceDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(a.initialBalanceDate)) {
             throw new Error('Backup enthält unvollständige oder beschädigte Kontodatensätze.');
+          }
+          if (a.checkpointBalance !== undefined && (typeof a.checkpointBalance !== 'number' || isNaN(a.checkpointBalance))) {
+            throw new Error(`Konto ${a.id} hat ungültigen checkpointBalance (muss Zahl sein): ${a.checkpointBalance}`);
           }
         }
       }
@@ -521,7 +537,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
           Dagobert v{APP_VERSION}
         </p>
         <p className="text-[11px]">
-          Build {BUILD_DATE} · Fully Verified Engine &amp; Precision-Fix aktiv
+          Build {BUILD_DATE} · Final Hardened Engine aktiv
         </p>
       </div>
     </div>

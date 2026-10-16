@@ -59,7 +59,23 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       // 4. Parse CSV
       const rawParsed = parseBankCsv(text, selectedTemplate, existingHashes);
 
-      // 4. Auto-categorize via rules
+      // 5. Detect pending promotions (Vorgemerkt in DB -> Jetzt Gebucht in CSV)
+      const pendingTxs = existingTxs.filter(t => t.status === 'pending');
+      for (const row of rawParsed) {
+        if (row.status === 'booked') {
+          const matchPending = pendingTxs.find(t =>
+            t.date === row.date &&
+            Math.abs(t.amount - row.amount) < 0.001 &&
+            t.payee.trim().toLowerCase() === row.payee.trim().toLowerCase()
+          );
+          if (matchPending) {
+            row.isPendingPromotion = true;
+            row.isDuplicate = false; // NOT a duplicate, it's an update!
+          }
+        }
+      }
+
+      // 6. Auto-categorize via rules
       const categorized = autoCategorizePreview(rawParsed, rules);
 
       setPreviewRows(categorized);
@@ -75,7 +91,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setIsCommitting(true);
 
     try {
-      const toImport = previewRows.filter(r => !r.isDuplicate);
+      const toImport = previewRows.filter(r => !r.isDuplicate || r.isPendingPromotion);
       if (toImport.length === 0 && csvMetadata?.newBalance === undefined) {
         alert('Keine neuen Buchungen oder Kontostände zum Aktualisieren vorhanden.');
         return;
@@ -157,7 +173,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     }
   };
 
-  const newCount = previewRows.filter(r => !r.isDuplicate).length;
+  const newCount = previewRows.filter(r => !r.isDuplicate && !r.isPendingPromotion).length;
+  const promotionCount = previewRows.filter(r => r.isPendingPromotion).length;
   const dupCount = previewRows.filter(r => r.isDuplicate).length;
 
   return (
@@ -264,6 +281,11 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                 <span className="text-ios-green flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" /> {newCount} neu
                 </span>
+                {promotionCount > 0 && (
+                  <span className="text-amber-500 font-semibold">
+                    ({promotionCount} Status-Updates)
+                  </span>
+                )}
                 {dupCount > 0 && (
                   <span className="text-ios-gray">
                     ({dupCount} bereits vorhanden)
@@ -291,7 +313,12 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                     <span className={`font-bold font-mono ${row.amount > 0 ? 'text-ios-green' : 'text-slate-900 dark:text-white'}`}>
                       {row.amount > 0 ? '+' : ''}{row.amount.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
                     </span>
-                    <div>
+                    <div className="flex items-center justify-end gap-1.5 mt-0.5">
+                      {row.isPendingPromotion && (
+                        <span className="text-[10px] bg-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded font-bold">
+                          Update (Gebucht)
+                        </span>
+                      )}
                       <select
                         value={row.category}
                         disabled={row.isDuplicate}
