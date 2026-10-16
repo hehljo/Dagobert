@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Download, Upload, Trash2, Shield, Moon, Sun, Database, Sparkles, Fingerprint, KeyRound, Lock, Check, Landmark } from 'lucide-react';
 // db helpers
 import { parseGermanAmount } from '../lib/csvParser.ts';
-import { updateAccountSettings, exportProfileBackup, importProfileBackup, resetProfileData } from '../lib/api.ts';
+import { updateAccountSettings, exportProfileBackup, importProfileBackup, resetProfileData, batchImportTransactions } from '../lib/api.ts';
 import { APP_VERSION, BUILD_DATE } from '../version.ts';
 import { getSecurityConfig, saveSecurityConfig, registerPasskey, isPasskeySupported, hashPin, type SecurityConfig } from '../lib/passkey.ts';
 
@@ -264,9 +264,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       }
     ];
 
-    await importProfileBackup(profileId, { transactions: sampleTxs });
+    await batchImportTransactions(profileId, sampleTxs);
     onDataChanged();
-    alert('Demo-Daten erfolgreich eingefügt!');
+    alert('Demo-Daten erfolgreich hinzugefügt!');
   };
 
   const handleResetDatabase = async () => {
@@ -505,7 +505,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
           Dagobert v{APP_VERSION}
         </p>
         <p className="text-[11px]">
-          Build {BUILD_DATE} · Live-Sync &amp; Multi-Profile Hardened
+          Build {BUILD_DATE} · Precision Multi-Profile &amp; SQLite Sync aktiv
         </p>
       </div>
     </div>

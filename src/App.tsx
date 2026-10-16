@@ -61,10 +61,12 @@ export function App() {
     }
   }, []);
 
-  // Load data for active profile with race-condition prevention
-  const loadData = useCallback(async (profileId: string) => {
+  // Load data for active profile with race-condition prevention and silent background sync
+  const loadData = useCallback(async (profileId: string, isSilent = false) => {
     const loadId = ++activeLoadIdRef.current;
-    setIsLoading(true);
+    if (!isSilent) {
+      setIsLoading(true);
+    }
     try {
       const data = await fetchProfileData(profileId);
       // Discard stale responses if user switched profiles in between!
@@ -77,8 +79,15 @@ export function App() {
       setBankTemplates(data.bankTemplates);
     } catch (err) {
       console.error('Error fetching data:', err);
-    } finally {
+      // Clean state on failure so stale profile data is never shown!
       if (loadId === activeLoadIdRef.current) {
+        setAccounts([]);
+        setTransactions([]);
+        setRules([]);
+        setCategories([]);
+      }
+    } finally {
+      if (loadId === activeLoadIdRef.current && !isSilent) {
         setIsLoading(false);
       }
     }
@@ -114,7 +123,7 @@ export function App() {
 
     const handleSync = () => {
       if (!document.hidden && activeProfile) {
-        loadData(activeProfile.id);
+        loadData(activeProfile.id, true); // silent background sync!
       }
     };
 
