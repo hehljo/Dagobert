@@ -169,13 +169,20 @@ export async function initDatabaseDefaults() {
 export function calculateRealAccountBalance(account: Account | undefined, txs: Transaction[]): number {
   if (!account) return 0;
 
+  // STRICT ACCOUNT SCOPING: Only include transactions belonging to this account and exclude unbooked 'pending' items!
+  const accountTxs = txs.filter(t =>
+    (!t.account || t.account === account.name || t.account === account.id) &&
+    t.status !== 'pending'
+  );
+
   if (account.checkpointBalance !== undefined && account.checkpointDate) {
-    const afterCheckpoint = txs.filter(t => t.date > account.checkpointDate!);
+    // Only transactions AFTER checkpoint date
+    const afterCheckpoint = accountTxs.filter(t => t.date > account.checkpointDate!);
     const delta = afterCheckpoint.reduce((sum, t) => sum + t.amount, 0);
     return account.checkpointBalance + delta;
   }
 
-  const fromInitial = txs.filter(t => t.date >= account.initialBalanceDate);
+  const fromInitial = accountTxs.filter(t => t.date >= account.initialBalanceDate);
   const sum = fromInitial.reduce((sum, t) => sum + t.amount, 0);
   return account.initialBalance + sum;
 }

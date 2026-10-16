@@ -2,6 +2,7 @@ import type { Account } from '../types/index.ts';
 import React, { useState } from 'react';
 import { Download, Upload, Trash2, Shield, Moon, Sun, Database, Sparkles, Fingerprint, KeyRound, Lock, Check, Landmark } from 'lucide-react';
 import { db, initDatabaseDefaults } from '../lib/db.ts';
+import { parseGermanAmount } from '../lib/csvParser.ts';
 import { APP_VERSION, BUILD_DATE } from '../version.ts';
 import { getSecurityConfig, saveSecurityConfig, registerPasskey, isPasskeySupported, hashPin, type SecurityConfig } from '../lib/passkey.ts';
 
@@ -23,8 +24,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
 
   const handleSaveAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    const val = parseFloat(initBalInput.replace(',', '.'));
-    if (isNaN(val)) return;
+    const val = parseGermanAmount(initBalInput);
+    if (val === null) {
+      alert('Bitte einen gültigen Betrag eingeben (z. B. 2.500,00).');
+      return;
+    }
 
     await db.accounts.update('comdirect', {
       initialBalance: val,
@@ -88,6 +92,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
         categories: await db.categories.toArray(),
         rules: await db.rules.toArray(),
         bankTemplates: await db.bankTemplates.toArray(),
+        accounts: await db.accounts.toArray(),
       };
 
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -110,7 +115,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       const text = await file.text();
       const data = JSON.parse(text);
 
-      // 1. Strict Validation: Must be valid object with expected arrays
+      // 1. Strict Deep Validation:
       if (!data || typeof data !== 'object') {
         throw new Error('Ungültiges Dateiformat (kein JSON-Objekt).');
       }
@@ -119,13 +124,32 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       const hasCats = Array.isArray(data.categories);
       const hasRules = Array.isArray(data.rules);
       const hasTemplates = Array.isArray(data.bankTemplates);
+      const hasAccounts = Array.isArray(data.accounts);
 
-      if (!hasTxs && !hasCats && !hasRules) {
+      if (!hasTxs && !hasCats && !hasRules && !hasAccounts) {
         throw new Error('Die Backup-Datei enthält keine bekannten Dagobert-Daten.');
       }
 
-      // 2. Atomic Replacement: Only clear and replace inside a single Dexie transaction
-      await db.transaction('rw', [db.transactions, db.categories, db.rules, db.bankTemplates], async () => {
+      // Deep validate every transaction record
+      if (hasTxs) {
+        for (const t of data.transactions) {
+          if (!t || typeof t !== 'object' || !t.date || typeof t.amount !== 'number' || typeof t.category !== 'string') {
+            throw new Error('Backup enthält unvollständige oder beschädigte Buchungsdatensätze.');
+          }
+        }
+      }
+
+      // Deep validate categories
+      if (hasCats) {
+        for (const c of data.categories) {
+          if (!c || !c.id || !c.name) {
+            throw new Error('Backup enthält beschädigte Kategoriedaten.');
+          }
+        }
+      }
+
+      // 2. Atomic Replacement: All tables inside a single Dexie transaction!
+      await db.transaction('rw', [db.transactions, db.categories, db.rules, db.bankTemplates, db.accounts], async () => {
         if (hasTxs) {
           await db.transactions.clear();
           await db.transactions.bulkAdd(data.transactions);
@@ -141,6 +165,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
         if (hasTemplates) {
           await db.bankTemplates.clear();
           await db.bankTemplates.bulkAdd(data.bankTemplates);
+        }
+        if (hasAccounts) {
+          await db.accounts.clear();
+          await db.accounts.bulkAdd(data.accounts);
         }
       });
 
@@ -248,6 +276,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       await db.categories.clear();
       await db.rules.clear();
       await db.bankTemplates.clear();
+      await db.accounts.clear();
       await initDatabaseDefaults();
       onDataChanged();
       alert('Datenbank auf Werkseinstellungen zurückgesetzt.');
@@ -482,7 +511,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
           Dagobert v{APP_VERSION}
         </p>
         <p className="text-[11px]">
-          Build {BUILD_DATE} · Echter Saldo &amp; comdirect-Stichtag aktiv
+          Build {BUILD_DATE} · Hardened Engine &amp; Saldo-Schutz aktiv
         </p>
       </div>
     </div>

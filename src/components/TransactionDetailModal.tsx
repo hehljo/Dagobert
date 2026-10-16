@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Trash2, Sparkles, Check } from 'lucide-react';
 import type { Transaction, Category } from '../types/index.ts';
 import { createSuggestedRule } from '../lib/rulesEngine.ts';
+import { parseGermanAmount } from '../lib/csvParser.ts';
 import { db } from '../lib/db.ts';
 import { CategoryIcon } from './CategoryIcon.tsx';
 
@@ -43,9 +44,14 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
   }, [transaction]);
 
   const handleSave = async () => {
-    const parsedAmount = parseFloat(amountInput.replace(',', '.'));
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      alert('Bitte einen gültigen Betrag eingeben.');
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      alert('Bitte ein gültiges Datum auswählen.');
+      return;
+    }
+
+    const parsedAmount = parseGermanAmount(amountInput);
+    if (parsedAmount === null || parsedAmount <= 0) {
+      alert('Bitte einen gültigen Betrag eingeben (z. B. 45,50 oder 1.250,00).');
       return;
     }
 

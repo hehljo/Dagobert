@@ -40,20 +40,22 @@ export function isPasskeySupported(): boolean {
 }
 
 /**
- * Pure JavaScript SHA-256 implementation.
- * Guarantees working PIN hashing even over plain HTTP where crypto.subtle is undefined.
+ * Standard pure JavaScript SHA-256 implementation with complete UTF-8 encoding support.
+ * Byte-for-byte identical to crypto.subtle.digest('SHA-256').
  */
-function sha256Pure(ascii: string): string {
+function sha256Utf8(str: string): string {
   function rightRotate(value: number, amount: number) {
     return (value >>> amount) | (value << (32 - amount));
   }
   const mathPow = Math.pow;
   const maxWord = mathPow(2, 32);
-  const lengthProperty = 'length';
   let i = 0, j = 0;
   let result = '';
+
   const words: number[] = [];
-  const asciiBitLength = ascii[lengthProperty] * 8;
+  const utf8 = unescape(encodeURIComponent(str));
+  const asciiBitLength = utf8.length * 8;
+
   const hash: number[] = [];
   const k: number[] = [];
   let primeCounter = 0;
@@ -69,17 +71,17 @@ function sha256Pure(ascii: string): string {
     }
   }
 
-  ascii += '\x80';
-  while ((ascii[lengthProperty] % 64) - 56) ascii += '\x00';
-  for (i = 0; i < ascii[lengthProperty]; i++) {
-    j = ascii.charCodeAt(i);
-    if (j >> 8) return '';
+  let padded = utf8 + '\x80';
+  while (padded.length % 64 !== 56) padded += '\x00';
+
+  for (i = 0; i < padded.length; i++) {
+    j = padded.charCodeAt(i);
     words[i >> 2] |= j << ((3 - (i % 4)) * 8);
   }
-  words[words[lengthProperty]] = (asciiBitLength / maxWord) | 0;
-  words[words[lengthProperty]] = asciiBitLength | 0;
+  words[words.length] = (asciiBitLength / maxWord) | 0;
+  words[words.length] = asciiBitLength | 0;
 
-  for (j = 0; j < words[lengthProperty]; ) {
+  for (j = 0; j < words.length; ) {
     const w = words.slice(j, (j += 16));
     const oldHash = hash.slice(0, 8);
     for (i = 0; i < 64; i++) {
@@ -121,8 +123,12 @@ function sha256Pure(ascii: string): string {
 }
 
 export async function hashPin(pin: string): Promise<string> {
-  const salt = pin + '_dagobert_salt';
-  // Check if Web Crypto subtle is supported in current context
+  const trimmed = (pin || '').trim();
+  if (!trimmed) return '';
+
+  const salt = trimmed + '_dagobert_salt';
+
+  // Use crypto.subtle if available (HTTPS)
   if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
     try {
       const msgUint8 = new TextEncoder().encode(salt);
@@ -130,10 +136,11 @@ export async function hashPin(pin: string): Promise<string> {
       const hashArray = Array.from(new Uint8Array(hashBuffer));
       return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     } catch {
-      // Fallback to pure JS
+      // Fallback below
     }
   }
-  return sha256Pure(salt);
+
+  return sha256Utf8(salt);
 }
 
 export async function registerPasskey(userName: string = 'User'): Promise<string> {
@@ -159,8 +166,8 @@ export async function registerPasskey(userName: string = 'User'): Promise<string
       displayName: userName
     },
     pubKeyCredParams: [
-      { alg: -7, type: 'public-key' },  // ES256
-      { alg: -257, type: 'public-key' } // RS256
+      { alg: -7, type: 'public-key' },
+      { alg: -257, type: 'public-key' }
     ],
     authenticatorSelection: {
       authenticatorAttachment: 'platform',

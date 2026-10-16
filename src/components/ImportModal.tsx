@@ -94,7 +94,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         category: row.category,
         account: selectedTemplate.name,
         importedAt: now,
-        sourceHash: row.sourceHash
+        sourceHash: row.sourceHash,
+        status: row.status // PRESERVE STATUS!
       }));
 
       // Atomic write inside Dexie transaction checking existing hashes and updating account balance
@@ -102,11 +103,15 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         if (csvMetadata?.newBalance !== undefined && csvMetadata?.endDate) {
           const acc = await db.accounts.get('comdirect');
           if (acc) {
-            await db.accounts.update('comdirect', {
-              checkpointBalance: csvMetadata.newBalance,
-              checkpointDate: csvMetadata.endDate,
-              iban: csvMetadata.iban || acc.iban
-            });
+            // ONLY update checkpoint if CSV is newer or equal to current checkpoint!
+            // Older CSVs (e.g. importing September after October) must NOT overwrite the October anchor!
+            if (!acc.checkpointDate || csvMetadata.endDate >= acc.checkpointDate) {
+              await db.accounts.update('comdirect', {
+                checkpointBalance: csvMetadata.newBalance,
+                checkpointDate: csvMetadata.endDate,
+                iban: csvMetadata.iban || acc.iban
+              });
+            }
           }
         }
         const existing = await db.transactions.toArray();
@@ -289,10 +294,16 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
               <button
                 onClick={handleCommitImport}
-                disabled={newCount === 0 || isCommitting}
+                disabled={(newCount === 0 && csvMetadata?.newBalance === undefined) || isCommitting}
                 className="flex-1 py-3 px-4 rounded-2xl bg-ios-tint text-white font-semibold text-sm shadow-md hover:brightness-110 active:scale-95 disabled:opacity-50 transition-all flex items-center justify-center space-x-2"
               >
-                <span>{isCommitting ? 'Wird gespeichert...' : `${newCount} Buchungen speichern`}</span>
+                <span>
+                  {isCommitting
+                    ? 'Wird gespeichert...'
+                    : newCount > 0
+                    ? `${newCount} Buchungen speichern`
+                    : 'Kontostand aktualisieren'}
+                </span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
