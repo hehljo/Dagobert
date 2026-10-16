@@ -349,7 +349,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
               <button
                 onClick={handleCommitImport}
-                disabled={(newCount === 0 && csvMetadata?.newBalance === undefined) || isCommitting}
+                disabled={(newCount === 0 && promotionCount === 0 && csvMetadata?.newBalance === undefined) || isCommitting}
                 className="flex-1 py-3 px-4 rounded-2xl bg-ios-tint text-white font-semibold text-sm shadow-md hover:brightness-110 active:scale-95 disabled:opacity-50 transition-all flex items-center justify-center space-x-2"
               >
                 <span>

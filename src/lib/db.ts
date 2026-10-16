@@ -158,13 +158,13 @@ export async function initDatabaseDefaults() {
   if (accountCount === 0) {
     await db.accounts.add(DEFAULT_ACCOUNT);
   }
-  // Auto-migrate legacy 32-bit hashes to 64-bit BigInt hashes
+  // Auto-migrate all legacy hashes to modern 64-bit BigInt hashes
   const allTxs = await db.transactions.toArray();
   for (const t of allTxs) {
-    if (t.id !== undefined && (!t.sourceHash || t.sourceHash.length !== 19)) {
-      const modernHash = computeTransactionHash(t.date, t.amount, t.rawText || t.purpose);
-      if (modernHash !== t.sourceHash) {
-        await db.transactions.update(t.id, { sourceHash: modernHash });
+    if (t.id !== undefined) {
+      const expectedHash = computeTransactionHash(t.date, t.amount, t.rawText || t.purpose);
+      if (t.sourceHash !== expectedHash) {
+        await db.transactions.update(t.id, { sourceHash: expectedHash });
       }
     }
   }

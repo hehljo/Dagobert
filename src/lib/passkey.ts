@@ -40,23 +40,21 @@ export function isPasskeySupported(): boolean {
 }
 
 /**
- * Standard pure JavaScript SHA-256 implementation with complete UTF-8 encoding support.
- * Byte-for-byte identical to crypto.subtle.digest('SHA-256').
+ * Byte-for-byte exact SHA-256 implementation matching Web Crypto across all Unicode strings.
  */
-function sha256Utf8(str: string): string {
+function sha256(ascii: string): string {
   function rightRotate(value: number, amount: number) {
     return (value >>> amount) | (value << (32 - amount));
   }
   const mathPow = Math.pow;
   const maxWord = mathPow(2, 32);
+  const lengthProperty = 'length';
   let i = 0, j = 0;
   let result = '';
-
   const words: number[] = [];
-  const utf8 = unescape(encodeURIComponent(str));
-  const asciiBitLength = utf8.length * 8;
-
-  const hash: number[] = [];
+  const utf8 = unescape(encodeURIComponent(ascii));
+  const asciiBitLength = utf8[lengthProperty] * 8;
+  let hash: number[] = [];
   const k: number[] = [];
   let primeCounter = 0;
   const isComposite: Record<number, number> = {};
@@ -72,21 +70,20 @@ function sha256Utf8(str: string): string {
   }
 
   let padded = utf8 + '\x80';
-  while (padded.length % 64 !== 56) padded += '\x00';
-
-  for (i = 0; i < padded.length; i++) {
+  while (padded[lengthProperty] % 64 !== 56) padded += '\x00';
+  for (i = 0; i < padded[lengthProperty]; i++) {
     j = padded.charCodeAt(i);
     words[i >> 2] |= j << ((3 - (i % 4)) * 8);
   }
-  words[words.length] = (asciiBitLength / maxWord) | 0;
-  words[words.length] = asciiBitLength | 0;
+  words[words[lengthProperty]] = (asciiBitLength / maxWord) | 0;
+  words[words[lengthProperty]] = asciiBitLength;
 
-  for (j = 0; j < words.length; ) {
+  for (j = 0; j < words[lengthProperty]; ) {
     const w = words.slice(j, (j += 16));
-    const oldHash = hash.slice(0, 8);
+    const oldHash = hash;
+    hash = hash.slice(0, 8);
     for (i = 0; i < 64; i++) {
-      const w15 = w[i - 15] || 0;
-      const w2 = w[i - 2] || 0;
+      const w15 = w[i - 15], w2 = w[i - 2];
       const s0 = rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3);
       const s1 = rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10);
       const ch = (hash[4] & hash[5]) ^ (~hash[4] & hash[6]);
@@ -96,17 +93,11 @@ function sha256Utf8(str: string): string {
         (rightRotate(hash[4], 6) ^ rightRotate(hash[4], 11) ^ rightRotate(hash[4], 25)) +
         ch +
         k[i] +
-        (w[i] = i < 16 ? w[i] || 0 : ((w[i - 16] || 0) + s0 + (w[i - 7] || 0) + s1) | 0);
+        (w[i] = i < 16 ? w[i] : (w[i - 16] + s0 + w[i - 7] + s1) | 0);
       const temp2 = (rightRotate(hash[0], 2) ^ rightRotate(hash[0], 13) ^ rightRotate(hash[0], 22)) + maj;
 
-      hash[7] = hash[6];
-      hash[6] = hash[5];
-      hash[5] = hash[4];
+      hash = [(temp1 + temp2) | 0].concat(hash);
       hash[4] = (hash[4] + temp1) | 0;
-      hash[3] = hash[2];
-      hash[2] = hash[1];
-      hash[1] = hash[0];
-      hash[0] = (temp1 + temp2) | 0;
     }
     for (i = 0; i < 8; i++) {
       hash[i] = (hash[i] + oldHash[i]) | 0;
@@ -128,7 +119,6 @@ export async function hashPin(pin: string): Promise<string> {
 
   const salt = trimmed + '_dagobert_salt';
 
-  // Use crypto.subtle if available (HTTPS)
   if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
     try {
       const msgUint8 = new TextEncoder().encode(salt);
@@ -136,11 +126,11 @@ export async function hashPin(pin: string): Promise<string> {
       const hashArray = Array.from(new Uint8Array(hashBuffer));
       return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     } catch {
-      // Fallback below
+      // Fallback
     }
   }
 
-  return sha256Utf8(salt);
+  return sha256(salt);
 }
 
 export async function registerPasskey(userName: string = 'User'): Promise<string> {

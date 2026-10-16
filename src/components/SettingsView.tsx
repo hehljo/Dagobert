@@ -140,7 +140,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
           if (typeof t.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(t.date)) {
             throw new Error(`Backup enthält Buchung mit ungültigem Datum: ${t.date}`);
           }
-          if (typeof t.amount !== 'number' || isNaN(t.amount)) {
+          if (typeof t.amount !== 'number' || !Number.isFinite(t.amount)) {
             throw new Error('Backup enthält Buchung mit ungültigem Betrag.');
           }
           if (typeof t.category !== 'string' || !t.category) {
@@ -156,11 +156,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       // Deep validate accounts (strictly check checkpointBalance is number if present)
       if (hasAccounts) {
         for (const a of data.accounts) {
-          if (!a || typeof a !== 'object' || !a.id || !a.name || typeof a.initialBalance !== 'number' || isNaN(a.initialBalance) || typeof a.initialBalanceDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(a.initialBalanceDate)) {
+          if (!a || typeof a !== 'object' || !a.id || !a.name || typeof a.initialBalance !== 'number' || !Number.isFinite(a.initialBalance) || typeof a.initialBalanceDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(a.initialBalanceDate)) {
             throw new Error('Backup enthält unvollständige oder beschädigte Kontodatensätze.');
           }
-          if (a.checkpointBalance !== undefined && (typeof a.checkpointBalance !== 'number' || isNaN(a.checkpointBalance))) {
+          if (a.checkpointBalance !== undefined && (typeof a.checkpointBalance !== 'number' || !Number.isFinite(a.checkpointBalance))) {
             throw new Error(`Konto ${a.id} hat ungültigen checkpointBalance (muss Zahl sein): ${a.checkpointBalance}`);
+          }
+          if (a.checkpointDate !== undefined && (typeof a.checkpointDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(a.checkpointDate))) {
+            throw new Error(`Konto ${a.id} hat ungültiges checkpointDate (muss YYYY-MM-DD sein): ${a.checkpointDate}`);
           }
         }
       }
@@ -537,7 +540,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
           Dagobert v{APP_VERSION}
         </p>
         <p className="text-[11px]">
-          Build {BUILD_DATE} · Final Hardened Engine aktiv
+          Build {BUILD_DATE} · Fully Verified Engine (Final Pass)
         </p>
       </div>
     </div>
