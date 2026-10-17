@@ -11,6 +11,7 @@ import { Navbar } from './components/Navbar.tsx';
 import { BottomNav, type NavTab } from './components/BottomNav.tsx';
 import { Dashboard } from './components/Dashboard.tsx';
 import { TransactionsView } from './components/TransactionsView.tsx';
+import { StatisticsView } from './components/StatisticsView.tsx';
 import { RulesView } from './components/RulesView.tsx';
 import { SettingsView } from './components/SettingsView.tsx';
 import { ImportModal } from './components/ImportModal.tsx';
@@ -209,6 +210,15 @@ export function App() {
             onClearCategoryFilter={() => setSelectedCategoryFilter(null)}
             onSelectTransaction={(tx) => setSelectedTx(tx)}
             selectedMonth={selectedMonth}
+          />
+        )}
+
+        {!isLoading && activeTab === 'statistics' && (
+          <StatisticsView
+            key={activeProfile?.id}
+            transactions={transactions}
+            categories={categories}
+            onSelectTransaction={setSelectedTx}
           />
         )}
 

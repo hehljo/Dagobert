@@ -1,7 +1,7 @@
 import React from 'react';
-import { LayoutDashboard, ArrowLeftRight, Sparkles, Settings } from 'lucide-react';
+import { LayoutDashboard, ArrowLeftRight, BarChart3, Sparkles, Settings } from 'lucide-react';
 
-export type NavTab = 'dashboard' | 'transactions' | 'rules' | 'settings';
+export type NavTab = 'dashboard' | 'transactions' | 'statistics' | 'rules' | 'settings';
 
 interface BottomNavProps {
   activeTab: NavTab;
@@ -13,13 +13,14 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onTabChange, tx
   const tabs = [
     { id: 'dashboard' as NavTab, label: 'Dashboard', icon: LayoutDashboard },
     { id: 'transactions' as NavTab, label: 'Buchungen', icon: ArrowLeftRight, badge: txCount },
+    { id: 'statistics' as NavTab, label: 'Statistik', icon: BarChart3 },
     { id: 'rules' as NavTab, label: 'Regeln', icon: Sparkles },
     { id: 'settings' as NavTab, label: 'Einstellungen', icon: Settings },
   ];
 
   return (
     <nav className="w-full flex-shrink-0 z-30 backdrop-blur-2xl bg-white/85 dark:bg-neutral-900/85 border-t border-ios-separator dark:border-ios-darkSeparator pb-[max(env(safe-area-inset-bottom,0px),0.5rem)] transition-colors">
-      <div className="max-w-md mx-auto flex items-center justify-around h-16 px-2">
+      <div className="max-w-md mx-auto grid grid-cols-5 items-center h-16 px-1 sm:px-2">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -28,7 +29,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onTabChange, tx
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
               aria-label={tab.label}
-              className={`flex-1 min-h-[48px] flex flex-col items-center justify-center relative py-1 transition-transform active:scale-90 ${
+              aria-current={isActive ? 'page' : undefined}
+              className={`min-w-0 min-h-[48px] flex flex-col items-center justify-center relative py-1 transition-transform active:scale-90 ${
                 isActive ? 'text-ios-tint font-semibold' : 'text-ios-gray hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
@@ -40,7 +42,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onTabChange, tx
                   </span>
                 )}
               </div>
-              <span className="text-[11px] mt-1 tracking-tight">{tab.label}</span>
+              <span className="text-[10px] sm:text-[11px] mt-1 tracking-tight">{tab.label}</span>
             </button>
           );
         })}
