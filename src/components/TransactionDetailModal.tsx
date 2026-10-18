@@ -11,11 +11,15 @@ interface TransactionDetailModalProps {
   transaction: Transaction | null;
   categories: Category[];
   onClose: () => void;
-  onSave: (transaction: Transaction) => void;
-  onDelete?: (id: number) => void;
+  onSave: (transaction: Transaction) => void | Promise<void>;
+  onDelete?: (id: number) => void | Promise<void>;
 }
 
-export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
+export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = props => {
+  return props.transaction ? <TransactionEditor {...props} transaction={props.transaction} /> : null;
+};
+
+const TransactionEditor: React.FC<TransactionDetailModalProps & { transaction: Transaction }> = ({
   profileId = 'privat',
   transaction,
   categories,
@@ -23,8 +27,6 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
   onSave,
   onDelete,
 }) => {
-  if (!transaction) return null;
-
   const isNew = transaction.id === undefined;
 
   const [date, setDate] = useState(transaction.date);
@@ -34,6 +36,8 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
   const [createRule, setCreateRule] = useState(false);
   const [payee, setPayee] = useState(transaction.payee);
   const [purpose, setPurpose] = useState(transaction.purpose);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setDate(transaction.date);
@@ -46,6 +50,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
   }, [transaction]);
 
   const handleSave = async () => {
+    if (isSaving) return;
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       alert('Bitte ein gültiges Datum auswählen.');
       return;
@@ -68,16 +73,22 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
       purpose: purpose.trim(),
     };
 
-    // If user wants to learn a smart rule
-    if (createRule && selectedCat !== transaction.category) {
-      const newRule = createSuggestedRule(updated, selectedCat);
-      if (newRule) {
-        await createCategoryRule(profileId, newRule);
+    setIsSaving(true);
+    setError(null);
+    try {
+      if (createRule && selectedCat !== transaction.category) {
+        const newRule = createSuggestedRule(updated, selectedCat);
+        if (newRule) {
+          await createCategoryRule(profileId, newRule);
+        }
       }
+      await onSave(updated);
+      onClose();
+    } catch {
+      setError('Buchung konnte nicht gespeichert werden. Deine Eingaben bleiben erhalten. Bitte erneut versuchen.');
+    } finally {
+      setIsSaving(false);
     }
-
-    onSave(updated);
-    onClose();
   };
 
   return (
@@ -90,6 +101,7 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
           </span>
           <button
             onClick={onClose}
+            disabled={isSaving}
             aria-label="Schließen"
             className="w-9 h-9 rounded-full bg-slate-100 dark:bg-neutral-800 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors"
           >
@@ -224,13 +236,22 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
         )}
 
         {/* Action Buttons */}
+        {error && <p role="alert" className="text-sm text-ios-red">{error}</p>}
         <div className="flex items-center space-x-3 pt-2">
           {!isNew && onDelete && transaction.id !== undefined && (
             <button
-              onClick={() => {
-                if (confirm('Buchung wirklich löschen?')) {
-                  onDelete(transaction.id!);
+              disabled={isSaving}
+              onClick={async () => {
+                if (isSaving || !confirm('Buchung wirklich löschen?')) return;
+                setIsSaving(true);
+                setError(null);
+                try {
+                  await onDelete(transaction.id!);
                   onClose();
+                } catch {
+                  setError('Buchung konnte nicht gelöscht werden. Bitte erneut versuchen.');
+                } finally {
+                  setIsSaving(false);
                 }
               }}
               aria-label="Buchung löschen"
@@ -243,9 +264,10 @@ export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = ({
 
           <button
             onClick={handleSave}
+            disabled={isSaving}
             className="flex-1 py-3 px-4 rounded-2xl bg-ios-tint text-white font-semibold shadow-md hover:brightness-110 active:scale-95 transition-all text-sm"
           >
-            {isNew ? 'Buchung anlegen' : 'Änderungen speichern'}
+            {isSaving ? 'Wird gespeichert…' : isNew ? 'Buchung anlegen' : 'Änderungen speichern'}
           </button>
         </div>
       </div>

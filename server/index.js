@@ -2,27 +2,25 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { db, initDatabase, seedProfileDefaults, hashPinServer } from './db.js';
+import { createProfileSecurity } from './profileSecurity.js';
 
 initDatabase();
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 
-// CORS headers for local/Tailscale access
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
-
 // Helper: check profile exists
 function getProfile(profileId) {
   return db.prepare('SELECT * FROM profiles WHERE id = ?').get(profileId);
 }
+
+const { requireAccess, unlock } = createProfileSecurity(getProfile, hashPinServer);
+const bodyProfileAccess = requireAccess(req => req.body?.profileId);
+const queryProfileAccess = requireAccess(req => req.query.profileId || 'privat');
+const profileAccess = requireAccess(req => req.params.id);
+// Resolve ownership from the database, never from a caller-supplied profile ID.
+const transactionAccess = requireAccess(req =>
+  db.prepare('SELECT profile_id FROM transactions WHERE id = ?').get(req.params.id)?.profile_id);
 
 // ----------------------------------------------------
 // Profiles Endpoints
@@ -47,6 +45,9 @@ app.post('/api/profiles', (req, res) => {
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'Name ist erforderlich' });
   }
+  if (pin && (typeof pin !== 'string' || !/^\d{4,6}$/.test(pin))) {
+    return res.status(400).json({ error: 'Die PIN muss 4 bis 6 Ziffern enthalten' });
+  }
 
   const id = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Date.now().toString(36).slice(-4);
   const now = new Date().toISOString();
@@ -62,11 +63,14 @@ app.post('/api/profiles', (req, res) => {
   res.json({ id, name: name.trim(), icon, color, isDefault: false, hasPin: !!pinHash });
 });
 
-app.put('/api/profiles/:id', (req, res) => {
+app.put('/api/profiles/:id', profileAccess, (req, res) => {
   const { id } = req.params;
   const { name, icon, color, pin, removePin } = req.body;
   const profile = getProfile(id);
   if (!profile) return res.status(404).json({ error: 'Profil nicht gefunden' });
+  if (pin && (typeof pin !== 'string' || !/^\d{4,6}$/.test(pin))) {
+    return res.status(400).json({ error: 'Die PIN muss 4 bis 6 Ziffern enthalten' });
+  }
 
   let pinHash = profile.pin_hash;
   if (removePin) {
@@ -82,12 +86,12 @@ app.put('/api/profiles/:id', (req, res) => {
         color = COALESCE(?, color),
         pin_hash = ?
     WHERE id = ?
-  `).run(name, icon, color, pinHash, id);
+  `).run(name ?? null, icon ?? null, color ?? null, pinHash, id);
 
   res.json({ success: true, hasPin: !!pinHash });
 });
 
-app.delete('/api/profiles/:id', (req, res) => {
+app.delete('/api/profiles/:id', profileAccess, (req, res) => {
   const { id } = req.params;
   const total = db.prepare('SELECT count(*) as count FROM profiles').get().count;
   if (total <= 1) {
@@ -98,29 +102,13 @@ app.delete('/api/profiles/:id', (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/api/profiles/:id/unlock', (req, res) => {
-  const { id } = req.params;
-  const { pin } = req.body;
-  const profile = getProfile(id);
-  if (!profile) return res.status(404).json({ error: 'Profil nicht gefunden' });
-
-  if (!profile.pin_hash) {
-    return res.json({ success: true });
-  }
-
-  const hashed = hashPinServer(pin);
-  if (hashed === profile.pin_hash) {
-    res.json({ success: true });
-  } else {
-    res.status(401).json({ error: 'Falsche PIN' });
-  }
-});
+app.post('/api/profiles/:id/unlock', unlock);
 
 // ----------------------------------------------------
 // Data Endpoint (Full State for active profile)
 // ----------------------------------------------------
 
-app.get('/api/data', (req, res) => {
+app.get('/api/data', queryProfileAccess, (req, res) => {
   const profileId = req.query.profileId || 'privat';
   const profile = getProfile(profileId);
   if (!profile) return res.status(404).json({ error: 'Profil nicht gefunden' });
@@ -202,7 +190,7 @@ app.get('/api/data', (req, res) => {
 // Transactions Endpoints
 // ----------------------------------------------------
 
-app.post('/api/transactions/batch', (req, res) => {
+app.post('/api/transactions/batch', bodyProfileAccess, (req, res) => {
   const { profileId, transactions = [], accountCheckpoint } = req.body;
   if (!profileId) return res.status(400).json({ error: 'profileId erforderlich' });
 
@@ -320,7 +308,7 @@ app.post('/api/transactions/batch', (req, res) => {
   });
 });
 
-app.post('/api/transactions', (req, res) => {
+app.post('/api/transactions', bodyProfileAccess, (req, res) => {
   const { profileId, transaction } = req.body;
   if (!profileId || !transaction) return res.status(400).json({ error: 'Daten unvollständig' });
 
@@ -347,10 +335,10 @@ app.post('/api/transactions', (req, res) => {
     now
   );
 
-  res.json({ id: info.lastInsertRowid });
+  res.json({ id: Number(info.lastInsertRowid) });
 });
 
-app.put('/api/transactions/:id', (req, res) => {
+app.put('/api/transactions/:id', transactionAccess, (req, res) => {
   const { id } = req.params;
   const { transaction } = req.body;
   if (!transaction) return res.status(400).json({ error: 'Keine Daten' });
@@ -379,13 +367,13 @@ app.put('/api/transactions/:id', (req, res) => {
   res.json({ success: true });
 });
 
-app.delete('/api/transactions/:id', (req, res) => {
+app.delete('/api/transactions/:id', transactionAccess, (req, res) => {
   const { id } = req.params;
   db.prepare('DELETE FROM transactions WHERE id = ?').run(id);
   res.json({ success: true });
 });
 
-app.put('/api/accounts/:id', (req, res) => {
+app.put('/api/accounts/:id', bodyProfileAccess, (req, res) => {
   const { id } = req.params;
   const { profileId, initialBalance, initialBalanceDate } = req.body;
 
@@ -399,7 +387,7 @@ app.put('/api/accounts/:id', (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/api/rules', (req, res) => {
+app.post('/api/rules', bodyProfileAccess, (req, res) => {
   const { profileId, rule } = req.body;
   if (!profileId || !rule) return res.status(400).json({ error: 'Daten fehlen' });
 
@@ -417,7 +405,7 @@ app.post('/api/rules', (req, res) => {
   res.json({ success: true });
 });
 
-app.delete('/api/rules/:id', (req, res) => {
+app.delete('/api/rules/:id', requireAccess(req => req.query.profileId || req.body?.profileId), (req, res) => {
   const { id } = req.params;
   const profileId = req.query.profileId || req.body?.profileId;
   if (!profileId) {
@@ -431,7 +419,7 @@ app.delete('/api/rules/:id', (req, res) => {
 // ----------------------------------------------------
 // Server-Side Backup & Restore Endpoints
 // ----------------------------------------------------
-app.get('/api/backup', (req, res) => {
+app.get('/api/backup', queryProfileAccess, (req, res) => {
   const profileId = req.query.profileId || 'privat';
   const profile = getProfile(profileId);
   if (!profile) return res.status(404).json({ error: 'Profil nicht gefunden' });
@@ -505,7 +493,7 @@ app.get('/api/backup', (req, res) => {
   });
 });
 
-app.post('/api/backup/import', (req, res) => {
+app.post('/api/backup/import', bodyProfileAccess, (req, res) => {
   const { profileId, data } = req.body;
   if (!profileId || !data) return res.status(400).json({ error: 'Daten unvollständig' });
 
@@ -601,7 +589,7 @@ app.post('/api/backup/import', (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/api/reset', (req, res) => {
+app.post('/api/reset', bodyProfileAccess, (req, res) => {
   const { profileId } = req.body;
   if (!profileId) return res.status(400).json({ error: 'profileId erforderlich' });
 
@@ -632,6 +620,12 @@ if (fs.existsSync(DIST_DIR)) {
 }
 
 const PORT = process.env.PORT || 5052;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Dagobert Central Server running at http://0.0.0.0:${PORT}`);
+const HOST = process.env.HOST || '0.0.0.0';
+const server = app.listen(PORT, HOST, error => {
+  if (error) {
+    console.error('Server konnte nicht gestartet werden:', error.message);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`Dagobert Central Server running at http://${HOST}:${server.address().port}`);
 });

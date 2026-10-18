@@ -2,6 +2,8 @@ import type { Profile, Account, Category, CategoryRule, Transaction, BankTemplat
 
 const BASE_URL = ''; // Relative to current host so it works across any IP/domain/Tailscale!
 
+export class ProfileLockedError extends Error {}
+
 export async function fetchProfiles(): Promise<Profile[]> {
   const res = await fetch(`${BASE_URL}/api/profiles`);
   if (!res.ok) throw new Error('Fehler beim Laden der Profile');
@@ -27,6 +29,11 @@ export async function unlockProfile(profileId: string, pin: string): Promise<boo
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pin })
   });
+  if (res.status === 401) return false;
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Entsperren fehlgeschlagen. Bitte die Verbindung prüfen.');
+  }
   return res.ok;
 }
 
@@ -39,6 +46,7 @@ export async function fetchProfileData(profileId: string): Promise<{
   bankTemplates: BankTemplate[];
 }> {
   const res = await fetch(`${BASE_URL}/api/data?profileId=${encodeURIComponent(profileId)}`);
+  if (res.status === 401) throw new ProfileLockedError();
   if (!res.ok) throw new Error('Fehler beim Laden der Kontodaten');
   return res.json();
 }

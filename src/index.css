@@ -2,6 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
+:root { color-scheme: light; }
+:root.dark { color-scheme: dark; }
+
 @layer utilities {
   .pt-safe {
     padding-top: env(safe-area-inset-top, 0px);

@@ -5,7 +5,8 @@ import {
   fetchProfileData,
   createManualTransaction,
   updateExistingTransaction,
-  deleteExistingTransaction
+  deleteExistingTransaction,
+  ProfileLockedError
 } from './lib/api.ts';
 import { Navbar } from './components/Navbar.tsx';
 import { BottomNav, type NavTab } from './components/BottomNav.tsx';
@@ -17,8 +18,16 @@ import { SettingsView } from './components/SettingsView.tsx';
 import { ImportModal } from './components/ImportModal.tsx';
 import { TransactionDetailModal } from './components/TransactionDetailModal.tsx';
 import { ProfileModal } from './components/ProfileModal.tsx';
+import { LockScreen } from './components/LockScreen.tsx';
+import { ProfileUnlock } from './components/ProfileUnlock.tsx';
+import { getSecurityConfig } from './lib/passkey.ts';
 
 export function App() {
+  const [isUnlocked, setIsUnlocked] = useState(() => !getSecurityConfig().enabled);
+  return isUnlocked ? <UnlockedApp /> : <LockScreen onUnlock={() => setIsUnlocked(true)} />;
+}
+
+function UnlockedApp() {
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [isDark, setIsDark] = useState<boolean>(() => {
     return localStorage.getItem('dagobert_theme') === 'dark' ||
@@ -45,28 +54,38 @@ export function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [bankTemplates, setBankTemplates] = useState<BankTemplate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [profileLocked, setProfileLocked] = useState(false);
   const activeLoadIdRef = useRef(0);
+  const loadedProfileIdRef = useRef<string | null>(null);
+  const pendingDataLoadRef = useRef(false);
 
   // Load profiles
   const loadProfiles = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
     try {
       const list = await fetchProfiles();
       setProfiles(list);
       const savedId = localStorage.getItem('dagobert_active_profile_id');
       const matched = list.find(p => p.id === savedId) || list.find(p => p.isDefault) || list[0];
-      if (matched) {
-        setActiveProfile(matched);
-      }
+      if (!matched) throw new Error('Keine Profile vorhanden');
+      setActiveProfile(matched);
     } catch {
-      // Fallback
+      setLoadError('Profile konnten nicht geladen werden. Bitte die Verbindung zum Server prüfen.');
+      setIsLoading(false);
     }
   }, []);
 
   // Load data for active profile with race-condition prevention and silent background sync
   const loadData = useCallback(async (profileId: string, isSilent = false) => {
+    // Background sync must not interrupt the first load of a profile.
+    if (isSilent && (loadedProfileIdRef.current !== profileId || pendingDataLoadRef.current)) return;
     const loadId = ++activeLoadIdRef.current;
+    pendingDataLoadRef.current = true;
     if (!isSilent) {
       setIsLoading(true);
+      setLoadError(null);
     }
     try {
       const data = await fetchProfileData(profileId);
@@ -78,17 +97,31 @@ export function App() {
       setRules(data.rules);
       setTransactions(data.transactions);
       setBankTemplates(data.bankTemplates);
+      loadedProfileIdRef.current = profileId;
+      setProfileLocked(false);
+      setLoadError(null);
     } catch (err) {
-      console.error('Error fetching data:', err);
-      // Clean state on failure so stale profile data is never shown!
       if (loadId === activeLoadIdRef.current) {
-        setAccounts([]);
-        setTransactions([]);
-        setRules([]);
-        setCategories([]);
+        if (err instanceof ProfileLockedError) {
+          loadedProfileIdRef.current = null;
+          setAccounts([]);
+          setTransactions([]);
+          setCategories([]);
+          setRules([]);
+          setBankTemplates([]);
+          setSelectedTx(null);
+          setIsImportOpen(false);
+          setProfileLocked(true);
+          setLoadError(null);
+          return;
+        }
+        setLoadError(loadedProfileIdRef.current === profileId
+          ? 'Aktualisierung fehlgeschlagen. Du siehst die zuletzt geladenen Daten.'
+          : 'Kontodaten konnten nicht geladen werden. Bitte die Verbindung zum Server prüfen.');
       }
     } finally {
-      if (loadId === activeLoadIdRef.current && !isSilent) {
+      if (loadId === activeLoadIdRef.current) {
+        pendingDataLoadRef.current = false;
         setIsLoading(false);
       }
     }
@@ -143,6 +176,21 @@ export function App() {
 
   // Switch profile handler
   const handleSelectProfile = (profile: Profile) => {
+    if (profile.id !== activeProfile?.id) {
+      // Invalidate pending responses and remove the previous profile immediately.
+      ++activeLoadIdRef.current;
+      loadedProfileIdRef.current = null;
+      setAccounts([]);
+      setCategories([]);
+      setRules([]);
+      setTransactions([]);
+      setBankTemplates([]);
+      setIsLoading(true);
+      setLoadError(null);
+      setProfileLocked(false);
+      setSelectedTx(null);
+      setIsImportOpen(false);
+    }
     setActiveProfile(profile);
     setSelectedCategoryFilter(null);
   };
@@ -168,6 +216,7 @@ export function App() {
   };
 
   const activeAccount = accounts[0];
+  const hasProfileData = !!activeProfile && loadedProfileIdRef.current === activeProfile.id;
 
   return (
     <div className="h-[100dvh] flex flex-col bg-slate-50 dark:bg-black text-slate-900 dark:text-white transition-colors duration-200 overflow-hidden select-none">
@@ -177,6 +226,7 @@ export function App() {
         onOpenImport={() => setIsImportOpen(true)}
         onOpenNewManual={handleOpenNewManual}
         onOpenProfiles={() => setIsProfileModalOpen(true)}
+        actionsDisabled={isLoading || !hasProfileData || profileLocked}
       />
 
       {/* Main Content Area */}
@@ -187,7 +237,33 @@ export function App() {
           </div>
         )}
 
-        {!isLoading && activeTab === 'dashboard' && (
+        {loadError && (
+          <div role="alert" className="max-w-5xl mx-auto p-4">
+            <div className="rounded-2xl border border-amber-500/40 bg-amber-50 dark:bg-amber-950 p-4 text-sm text-amber-950 dark:text-amber-100 space-y-3">
+              <p>{loadError}</p>
+              <button
+                onClick={() => activeProfile ? loadData(activeProfile.id) : loadProfiles()}
+                disabled={isLoading}
+                className="min-h-[48px] px-4 rounded-xl bg-ios-tint text-white font-semibold disabled:opacity-50"
+              >
+                Erneut versuchen
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!isLoading && profileLocked && activeProfile && (
+          <ProfileUnlock
+            key={activeProfile.id}
+            profile={activeProfile}
+            onUnlocked={() => {
+              setProfileLocked(false);
+              loadData(activeProfile.id);
+            }}
+          />
+        )}
+
+        {!isLoading && hasProfileData && activeTab === 'dashboard' && (
           <Dashboard
             transactions={transactions}
             categories={categories}
@@ -202,7 +278,7 @@ export function App() {
           />
         )}
 
-        {!isLoading && activeTab === 'transactions' && (
+        {!isLoading && hasProfileData && activeTab === 'transactions' && (
           <TransactionsView
             transactions={transactions}
             categories={categories}
@@ -213,7 +289,7 @@ export function App() {
           />
         )}
 
-        {!isLoading && activeTab === 'statistics' && (
+        {!isLoading && hasProfileData && activeTab === 'statistics' && (
           <StatisticsView
             key={activeProfile?.id}
             transactions={transactions}
@@ -222,7 +298,7 @@ export function App() {
           />
         )}
 
-        {!isLoading && activeTab === 'rules' && (
+        {!isLoading && hasProfileData && activeTab === 'rules' && (
           <RulesView
             profileId={activeProfile?.id || 'privat'}
             rules={rules}
@@ -234,7 +310,7 @@ export function App() {
           />
         )}
 
-        {!isLoading && activeTab === 'settings' && (
+        {!isLoading && hasProfileData && activeTab === 'settings' && (
           <SettingsView
             profileId={activeProfile?.id || 'privat'}
             account={activeAccount}
@@ -254,17 +330,19 @@ export function App() {
       />
 
       {/* Profile Management Modal */}
-      <ProfileModal
+      {isProfileModalOpen && <ProfileModal
+        key={activeProfile?.id}
         isOpen={isProfileModalOpen}
         profiles={profiles}
         activeProfileId={activeProfile?.id || 'privat'}
         onClose={() => setIsProfileModalOpen(false)}
         onSelectProfile={handleSelectProfile}
         onProfilesChanged={loadProfiles}
-      />
+      />}
 
       {/* comdirect CSV Import Modal */}
-      <ImportModal
+      {isImportOpen && <ImportModal
+        key={activeProfile?.id}
         isOpen={isImportOpen}
         profileId={activeProfile?.id || 'privat'}
         existingTransactions={transactions}
@@ -277,10 +355,11 @@ export function App() {
           if (activeProfile) loadData(activeProfile.id);
           setActiveTab('dashboard');
         }}
-      />
+      />}
 
       {/* Transaction Detail & Edit Modal */}
-      <TransactionDetailModal
+      {selectedTx && <TransactionDetailModal
+        key={selectedTx?.id ?? selectedTx?.sourceHash ?? 'closed'}
         profileId={activeProfile?.id || 'privat'}
         transaction={selectedTx}
         categories={categories}
@@ -299,7 +378,7 @@ export function App() {
           await deleteExistingTransaction(id);
           await loadData(activeProfile.id);
         }}
-      />
+      />}
     </div>
   );
 }

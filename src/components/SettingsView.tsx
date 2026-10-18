@@ -69,8 +69,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
   const handleSavePin = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanPin = pinInput.trim();
-    if (cleanPin.length < 4) {
-      alert('PIN muss mindestens 4 Ziffern lang sein (keine reinen Leerzeichen).');
+    if (!/^\d{4,6}$/.test(cleanPin)) {
+      alert('Die PIN muss 4 bis 6 Ziffern enthalten.');
       return;
     }
 
@@ -327,6 +327,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
 
           <button
             onClick={handleToggleSecurity}
+            aria-label={security.enabled ? 'App-Sperre deaktivieren' : 'App-Sperre aktivieren'}
+            aria-pressed={security.enabled}
             className={`w-12 h-7 rounded-full p-1 transition-colors ${security.enabled ? 'bg-ios-green' : 'bg-slate-300'}`}
           >
             <div className={`w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${security.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
@@ -363,6 +365,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
                 type="password"
                 maxLength={6}
                 placeholder="4-6 Ziffern"
+                aria-label="Neue App-PIN"
+                inputMode="numeric"
                 value={pinInput}
                 onChange={(e) => setPinInput(e.target.value)}
                 className="flex-1 px-3 py-2 bg-white dark:bg-neutral-700 rounded-xl outline-none font-mono text-center tracking-widest text-sm"

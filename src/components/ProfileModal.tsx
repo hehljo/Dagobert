@@ -20,8 +20,6 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   onSelectProfile,
   onProfilesChanged,
 }) => {
-  if (!isOpen) return null;
-
   const [isCreating, setIsCreating] = useState(false);
   const [name, setName] = useState('');
   const [icon, setIcon] = useState('User');
@@ -33,6 +31,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [unlockTarget, setUnlockTarget] = useState<Profile | null>(null);
   const [unlockPin, setUnlockPin] = useState('');
   const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [isUnlocking, setIsUnlocking] = useState(false);
+
+  if (!isOpen) return null;
 
   const handleSelect = (p: Profile) => {
     if (p.id === activeProfileId) {
@@ -53,16 +54,23 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
   const handleUnlockSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!unlockTarget) return;
-
-    const ok = await unlockProfile(unlockTarget.id, unlockPin);
-    if (ok) {
-      onSelectProfile(unlockTarget);
-      setUnlockTarget(null);
-      onClose();
-    } else {
-      setUnlockError('Falsche PIN für dieses Profil.');
-      setUnlockPin('');
+    if (!unlockTarget || isUnlocking) return;
+    setIsUnlocking(true);
+    setUnlockError(null);
+    try {
+      const ok = await unlockProfile(unlockTarget.id, unlockPin);
+      if (ok) {
+        onSelectProfile(unlockTarget);
+        setUnlockTarget(null);
+        onClose();
+      } else {
+        setUnlockError('Falsche PIN für dieses Profil.');
+        setUnlockPin('');
+      }
+    } catch (err) {
+      setUnlockError(err instanceof Error ? err.message : 'Verbindung zum Server fehlgeschlagen.');
+    } finally {
+      setIsUnlocking(false);
     }
   };
 
@@ -71,6 +79,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     setErrorMsg(null);
     if (!name.trim()) {
       setErrorMsg('Bitte einen Profilnamen eingeben.');
+      return;
+    }
+    if (pin && !/^\d{4,6}$/.test(pin)) {
+      setErrorMsg('Die PIN muss 4 bis 6 Ziffern enthalten.');
       return;
     }
 
@@ -131,7 +143,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             <form onSubmit={handleUnlockSubmit} className="space-y-3">
               <input
                 type="password"
-                maxLength={6}
+                aria-label="Profil-PIN"
                 autoFocus
                 placeholder="Profil-PIN eingeben"
                 value={unlockPin}
@@ -140,7 +152,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               />
               <button
                 type="submit"
-                disabled={unlockPin.length < 4}
+                disabled={!unlockPin.trim() || isUnlocking}
                 className="w-full py-2.5 rounded-xl bg-ios-tint text-white font-semibold text-xs shadow-md disabled:opacity-40"
               >
                 Entsperren &amp; Wechseln
@@ -279,6 +291,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 <input
                   type="password"
                   maxLength={6}
+                  inputMode="numeric"
+                  aria-label="Neue Profil-PIN"
                   value={pin}
                   onChange={(e) => setPin(e.target.value)}
                   placeholder="Leer lassen für keinen PIN-Schutz"

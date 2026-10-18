@@ -88,7 +88,7 @@ interface LockScreenProps {
 }
 
 export const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
-  const [config] = useState(getSecurityConfig());
+  const [config, setConfig] = useState(getSecurityConfig);
   const [pin, setPin] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
@@ -112,6 +112,7 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
 
   const handlePinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isAuthenticating) return;
     setErrorMsg(null);
 
     // Security check: Must have a valid stored PIN hash
@@ -120,18 +121,25 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
       return;
     }
 
-    const hashed = await hashPin(pin);
-    const legacyHashed = hashLegacyPin(pin);
+    setIsAuthenticating(true);
+    try {
+      const hashed = await hashPin(pin);
+      const legacyHashed = hashLegacyPin(pin);
 
-    if (config.pinHash && (hashed === config.pinHash || legacyHashed === config.pinHash)) {
-      // If matched via legacy hash, migrate to standard byte-accurate hash automatically!
-      if (legacyHashed === config.pinHash && hashed !== config.pinHash) {
-        saveSecurityConfig({ ...config, pinHash: hashed });
+      if (hashed === config.pinHash || legacyHashed === config.pinHash) {
+        // Preserve PINs saved by the earlier local app lock.
+        if (legacyHashed === config.pinHash && hashed !== config.pinHash) {
+          saveSecurityConfig({ ...config, pinHash: hashed });
+        }
+        onUnlock();
+      } else {
+        setErrorMsg('Falsche PIN. Bitte erneut versuchen.');
+        setPin('');
       }
-      onUnlock();
-    } else {
-      setErrorMsg('Falsche PIN. Bitte erneut versuchen.');
-      setPin('');
+    } catch {
+      setErrorMsg('PIN konnte nicht geprüft werden. Bitte erneut versuchen.');
+    } finally {
+      setIsAuthenticating(false);
     }
   };
 
@@ -181,7 +189,7 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
             {config.pinHash && (
               <button
                 onClick={() => {
-                  config.type = 'pin';
+                  setConfig(current => ({ ...current, type: 'pin' }));
                 }}
                 className="text-xs text-ios-gray hover:text-white transition-colors"
               >
@@ -196,6 +204,9 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
               <KeyRound className="w-5 h-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-ios-gray" />
               <input
                 type="password"
+                aria-label="App-PIN"
+                inputMode="numeric"
+                autoComplete="current-password"
                 maxLength={6}
                 autoFocus
                 placeholder="PIN eingeben"
@@ -207,7 +218,7 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
 
             <button
               type="submit"
-              disabled={pin.length < 4}
+              disabled={pin.length < 4 || isAuthenticating}
               className="w-full py-3.5 rounded-2xl bg-ios-tint text-white font-semibold text-sm shadow-md hover:brightness-110 active:scale-95 disabled:opacity-40 transition-all min-h-[48px]"
             >
               Entsperren

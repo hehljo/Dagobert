@@ -27,8 +27,6 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   rules,
   onImportComplete,
 }) => {
-  if (!isOpen) return null;
-
   const [selectedTemplateId, setSelectedTemplateId] = useState(bankTemplates[0]?.id || 'comdirect');
   const [encoding, setEncoding] = useState<'windows-1252' | 'utf-8'>('windows-1252');
   const [fileName, setFileName] = useState<string | null>(null);
@@ -37,6 +35,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [isCommitting, setIsCommitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null);
+
+  if (!isOpen) return null;
 
   const selectedTemplate = bankTemplates.find(t => t.id === selectedTemplateId) || bankTemplates[0];
 

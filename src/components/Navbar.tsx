@@ -7,6 +7,7 @@ interface NavbarProps {
   onOpenImport: () => void;
   onOpenNewManual: () => void;
   onOpenProfiles: () => void;
+  actionsDisabled?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -14,6 +15,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenImport,
   onOpenNewManual,
   onOpenProfiles,
+  actionsDisabled = false,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-white/80 dark:bg-ios-darkCard/80 backdrop-blur-md border-b border-ios-separator dark:border-ios-darkSeparator pt-[env(safe-area-inset-top,0px)] transition-colors">
@@ -51,6 +53,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Quick Manual Entry */}
           <button
             onClick={onOpenNewManual}
+            disabled={actionsDisabled}
             className="flex items-center justify-center space-x-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-100 dark:bg-neutral-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-neutral-700 transition-colors min-h-[40px]"
             title="Manuelle Buchung erfassen"
           >
@@ -61,6 +64,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* CSV Import Button */}
           <button
             onClick={onOpenImport}
+            disabled={actionsDisabled}
             className="flex items-center justify-center space-x-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-ios-tint text-white shadow-sm hover:brightness-110 active:scale-95 transition-all min-h-[40px]"
             title="comdirect CSV importieren"
           >
