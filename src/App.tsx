@@ -219,7 +219,7 @@ function UnlockedApp() {
   const hasProfileData = !!activeProfile && loadedProfileIdRef.current === activeProfile.id;
 
   return (
-    <div className="h-[100dvh] flex flex-col bg-slate-50 dark:bg-black text-slate-900 dark:text-white transition-colors duration-200 overflow-hidden select-none">
+    <div className="h-full h-[var(--app-height,100%)] flex flex-col bg-slate-50 dark:bg-black text-slate-900 dark:text-white transition-colors duration-200 overflow-hidden select-none">
       {/* Top Header Navbar */}
       <Navbar
         activeProfile={activeProfile || undefined}

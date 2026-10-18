@@ -21,9 +21,27 @@
   }
 }
 
+:root {
+  --app-height: 100dvh;
+}
+
+@media all and (display-mode: standalone) {
+  :root {
+    --app-height: 100%;
+    --app-height: 100vh;
+    --app-height: 100lvh;
+  }
+}
+
+.is-pwa {
+  --app-height: 100%;
+  --app-height: 100vh;
+  --app-height: 100lvh;
+}
+
 html, body, #root {
   height: 100%;
-  height: 100dvh;
+  height: var(--app-height, 100%);
   margin: 0;
   padding: 0;
   overflow: hidden;
