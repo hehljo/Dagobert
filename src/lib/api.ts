@@ -121,6 +121,16 @@ export async function createCategoryRule(profileId: string, rule: CategoryRule):
   if (!res.ok) throw new Error('Fehler beim Speichern der Regel');
 }
 
+export async function loadStandardCategoryRules(profileId: string): Promise<{ inserted: number; updated: number }> {
+  const res = await fetch(`${BASE_URL}/api/rules/defaults`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profileId })
+  });
+  if (!res.ok) throw new Error('Standard-Regeln konnten nicht geladen werden. Bitte erneut versuchen.');
+  return res.json();
+}
+
 export async function deleteCategoryRule(id: string): Promise<void> {
   const res = await fetch(`${BASE_URL}/api/rules/${id}`, {
     method: 'DELETE'

@@ -1,0 +1,146 @@
+{
+  "rules": [
+    {
+      "id": "rule-gehalt",
+      "name": "Gehalt / Salär",
+      "priority": 10,
+      "conditions": [
+        {
+          "field": "purpose",
+          "operator": "contains",
+          "value": "Gehalt"
+        }
+      ],
+      "applyCategory": "gehalt",
+      "enabled": true
+    },
+    {
+      "id": "rule-supermarkt",
+      "name": "Supermärkte & Discounter",
+      "priority": 20,
+      "conditions": [
+        {
+          "field": "rawText",
+          "operator": "regex",
+          "value": "(REWE|EDEKA|ALDI|LIDL|KAUFLAND|PENNY|NETTO|DENNS)"
+        }
+      ],
+      "applyCategory": "lebensmittel",
+      "enabled": true
+    },
+    {
+      "id": "rule-drogerie",
+      "name": "Drogerie & Apotheke",
+      "priority": 25,
+      "conditions": [
+        {
+          "field": "rawText",
+          "operator": "regex",
+          "value": "(?:^|[^A-ZÄÖÜ0-9])(DM-DROGERIE|DM FIL|ROSSMANN|MUELLER|DOCMORRIS|SHOP-APOTHEKE|APOTHEKE)(?:$|[^A-ZÄÖÜ0-9])"
+        }
+      ],
+      "applyCategory": "gesundheit",
+      "enabled": true
+    },
+    {
+      "id": "rule-tanken",
+      "name": "Tanken & Ladestrom",
+      "priority": 30,
+      "conditions": [
+        {
+          "field": "rawText",
+          "operator": "regex",
+          "value": "(ARAL|SHELL|TOTAL|JET|ESSO|ENBW|IONITY|TESLA)"
+        }
+      ],
+      "applyCategory": "mobilitaet",
+      "enabled": true
+    },
+    {
+      "id": "rule-abos",
+      "name": "Streaming & Software",
+      "priority": 35,
+      "conditions": [
+        {
+          "field": "rawText",
+          "operator": "regex",
+          "value": "(NETFLIX|SPOTIFY|APPLE|GOOGLE|AMAZON PRIME|DISNEY|OPENAI|GITHUB)"
+        }
+      ],
+      "applyCategory": "abos",
+      "enabled": true
+    },
+    {
+      "id": "rule-bahn",
+      "name": "Bahn & ÖPNV",
+      "priority": 40,
+      "conditions": [
+        {
+          "field": "rawText",
+          "operator": "regex",
+          "value": "(DEUTSCHE BAHN|DB VERTRIEB|AVV|MVG)"
+        }
+      ],
+      "applyCategory": "mobilitaet",
+      "enabled": true
+    },
+    {
+      "id": "rule-shopping",
+      "name": "Shopping & Kleidung",
+      "priority": 36,
+      "conditions": [
+        {
+          "field": "rawText",
+          "operator": "regex",
+          "value": "(?:^|[^A-ZÄÖÜ0-9])(ZALANDO|ZARA|H&M|H AND M|HENNES|ABOUT YOU|ASOS|BREUNINGER|PEEK|CLOPPENBURG|C&A|SNIPES|OTTO|BESTSECRET|TK MAXX|PRIMARK|DEICHMANN|NEW YORKER|MANGO|UNIQLO|BONPRIX|AMAZON)(?:$|[^A-ZÄÖÜ0-9])"
+        }
+      ],
+      "applyCategory": "shopping",
+      "enabled": true
+    },
+    {
+      "id": "rule-restaurants",
+      "name": "Restaurants & Lieferdienste",
+      "priority": 27,
+      "conditions": [
+        {
+          "field": "rawText",
+          "operator": "regex",
+          "value": "(?:^|[^A-ZÄÖÜ0-9])(LIEFERANDO|WOLT|UBER EATS|MCDONALD(?:[’']?S)?|BURGER KING|SUBWAY|DOMINO(?:[’']?S)?|VAPIANO|KFC|STARBUCKS|BACKWERK|DEAN AND DAVID)(?:$|[^A-ZÄÖÜ0-9])"
+        }
+      ],
+      "applyCategory": "freizeit",
+      "enabled": true
+    },
+    {
+      "id": "rule-wohnen",
+      "name": "Telekommunikation & Energie",
+      "priority": 28,
+      "conditions": [
+        {
+          "field": "rawText",
+          "operator": "regex",
+          "value": "(?:^|[^A-ZÄÖÜ0-9])(TELEKOM|VODAFONE|O2|1&1|CONGSTAR|RUNDFUNK|BEITRAGSSERVICE|GEZ|STADTWERKE|ENBW|E\\.ON|VATTENFALL)(?:$|[^A-ZÄÖÜ0-9])"
+        }
+      ],
+      "applyCategory": "wohnen",
+      "enabled": true
+    }
+  ],
+  "previousVersions": [
+    {
+      "id": "rule-drogerie",
+      "name": "Drogerie & Pflege",
+      "priority": 25,
+      "conditions": [
+        {
+          "field": "rawText",
+          "operator": "regex",
+          "value": "(DM-DROGERIE|ROSSMANN|MUELLER)"
+        }
+      ],
+      "applyCategory": "gesundheit",
+      "enabled": true
+    }
+  ]
+}

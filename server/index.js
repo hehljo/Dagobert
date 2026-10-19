@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
-import { db, initDatabase, seedProfileDefaults, hashPinServer } from './db.js';
+import { db, initDatabase, seedProfileDefaults, loadStandardRules, hashPinServer } from './db.js';
 import { createProfileSecurity } from './profileSecurity.js';
 
 initDatabase();
@@ -411,6 +411,10 @@ app.put('/api/accounts/:id', bodyProfileAccess, (req, res) => {
   );
 
   res.json({ success: true });
+});
+
+app.post('/api/rules/defaults', bodyProfileAccess, (req, res) => {
+  res.json(loadStandardRules(req.body.profileId));
 });
 
 app.post('/api/rules', bodyProfileAccess, (req, res) => {

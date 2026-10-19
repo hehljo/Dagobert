@@ -22,6 +22,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'expense' | 'income'>('all');
+  const [onlyUncategorized, setOnlyUncategorized] = useState(false);
+  const [showAllMonths, setShowAllMonths] = useState(false);
+
+  const uncategorizedCount = useMemo(() => transactions.filter(t => t.category === 'sonstiges').length, [transactions]);
 
   const catMap = useMemo(() => new Map(categories.map(c => [c.id, c])), [categories]);
 
@@ -29,13 +33,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   const filtered = useMemo(() => {
     return transactions.filter(t => {
       // Month
-      if (!t.date.startsWith(selectedMonth)) return false;
+      if (!showAllMonths && !t.date.startsWith(selectedMonth)) return false;
 
       // Type
       if (typeFilter === 'expense' && t.amount >= 0) return false;
       if (typeFilter === 'income' && t.amount <= 0) return false;
 
       // Category filter
+      if (onlyUncategorized && t.category !== 'sonstiges') return false;
       if (selectedCategoryFilter && t.category !== selectedCategoryFilter) return false;
 
       // Search term
@@ -50,7 +55,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
       return true;
     }).sort((a, b) => b.date.localeCompare(a.date) || (b.id || 0) - (a.id || 0));
-  }, [transactions, selectedMonth, typeFilter, selectedCategoryFilter, searchTerm]);
+  }, [transactions, selectedMonth, showAllMonths, onlyUncategorized, typeFilter, selectedCategoryFilter, searchTerm]);
 
   // Group by Date
   const groupedByDate = useMemo(() => {
@@ -66,7 +71,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         const formattedDate = dateObj.toLocaleDateString('de-DE', {
           weekday: 'short',
           day: '2-digit',
-          month: 'short'
+          month: 'short',
+          ...(showAllMonths ? { year: 'numeric' as const } : {})
         });
 
         currentGroup = {
@@ -83,7 +89,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       }
     }
     return groups;
-  }, [filtered]);
+  }, [filtered, showAllMonths]);
 
   return (
     <div className="space-y-4 pb-24 max-w-5xl mx-auto px-4 pt-4">
@@ -102,7 +108,38 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         </div>
 
         {/* Filter Pills */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar text-xs">
+        <div className="flex flex-wrap items-center gap-2 pb-1 text-xs">
+          <button
+            aria-pressed={onlyUncategorized}
+            aria-label={`Nur unkategorisiert (${uncategorizedCount.toLocaleString('de-DE')})`}
+            onClick={() => {
+              const next = !onlyUncategorized;
+              setOnlyUncategorized(next);
+              if (next) {
+                onClearCategoryFilter();
+                setTypeFilter('all');
+                setSearchTerm('');
+                setShowAllMonths(true);
+              }
+            }}
+            className={`px-3 py-2 rounded-full font-medium min-h-[48px] flex items-center gap-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-ios-tint ${onlyUncategorized ? 'bg-ios-tint text-white' : 'bg-slate-100 dark:bg-neutral-800 text-slate-700 dark:text-slate-300'}`}
+          >
+            Nur unkategorisiert ({uncategorizedCount.toLocaleString('de-DE')})
+          </button>
+          <button
+            onClick={() => setShowAllMonths(value => !value)}
+            aria-pressed={showAllMonths}
+            className={`px-3 py-2 rounded-full font-medium min-h-[48px] flex items-center gap-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-ios-tint ${showAllMonths ? 'bg-ios-tint text-white' : 'bg-slate-100 dark:bg-neutral-800 text-slate-700 dark:text-slate-300'}`}
+          >
+            <Calendar className="w-4 h-4" />
+            Alle Monate anzeigen
+          </button>
+        </div>
+        <p className="text-xs text-ios-gray" role="status">
+          {filtered.length.toLocaleString('de-DE')} Buchungen · {showAllMonths ? 'Alle Jahre' : selectedMonth}
+          {' · '}{uncategorizedCount.toLocaleString('de-DE')} unkategorisiert im Profil
+        </p>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
           <button
             onClick={() => setTypeFilter('all')}
             className={`px-3 py-1.5 rounded-full font-medium min-h-[36px] flex items-center transition-colors ${
@@ -141,6 +178,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
               <span>{catMap.get(selectedCategoryFilter)?.name || selectedCategoryFilter}</span>
               <button
                 onClick={onClearCategoryFilter}
+                aria-label="Kategoriefilter aufheben"
                 className="ml-1 hover:text-amber-700 dark:hover:text-amber-200"
               >
                 <X className="w-3.5 h-3.5" />

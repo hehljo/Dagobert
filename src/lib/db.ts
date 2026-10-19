@@ -1,3 +1,4 @@
+import standardRules from './standardRules.json';
 import { computeTransactionHash } from './csvParser.ts';
 import Dexie, { type Table } from 'dexie';
 import type { Transaction, Category, CategoryRule, BankTemplate, Account } from '../types/index.ts';
@@ -64,68 +65,8 @@ export const COMDIRECT_TEMPLATE: BankTemplate = {
   dateFormat: 'DD.MM.YYYY'
 };
 
-export const DEFAULT_RULES: CategoryRule[] = [
-  {
-    id: 'rule-gehalt',
-    name: 'Gehalt / Salär',
-    priority: 10,
-    conditions: [
-      { field: 'purpose', operator: 'contains', value: 'Gehalt' }
-    ],
-    applyCategory: 'gehalt',
-    enabled: true
-  },
-  {
-    id: 'rule-supermarkt',
-    name: 'Supermärkte & Discounter',
-    priority: 20,
-    conditions: [
-      { field: 'rawText', operator: 'regex', value: '(REWE|EDEKA|ALDI|LIDL|KAUFLAND|PENNY|NETTO|DENNS)' }
-    ],
-    applyCategory: 'lebensmittel',
-    enabled: true
-  },
-  {
-    id: 'rule-drogerie',
-    name: 'Drogerie & Pflege',
-    priority: 25,
-    conditions: [
-      { field: 'rawText', operator: 'regex', value: '(DM-DROGERIE|ROSSMANN|MUELLER)' }
-    ],
-    applyCategory: 'gesundheit',
-    enabled: true
-  },
-  {
-    id: 'rule-tanken',
-    name: 'Tanken & Ladestrom',
-    priority: 30,
-    conditions: [
-      { field: 'rawText', operator: 'regex', value: '(ARAL|SHELL|TOTAL|JET|ESSO|ENBW|IONITY|TESLA)' }
-    ],
-    applyCategory: 'mobilitaet',
-    enabled: true
-  },
-  {
-    id: 'rule-abos',
-    name: 'Streaming & Software',
-    priority: 35,
-    conditions: [
-      { field: 'rawText', operator: 'regex', value: '(NETFLIX|SPOTIFY|APPLE|GOOGLE|AMAZON PRIME|DISNEY|OPENAI|GITHUB)' }
-    ],
-    applyCategory: 'abos',
-    enabled: true
-  },
-  {
-    id: 'rule-bahn',
-    name: 'Bahn & ÖPNV',
-    priority: 40,
-    conditions: [
-      { field: 'rawText', operator: 'regex', value: '(DEUTSCHE BAHN|DB VERTRIEB|AVV|MVG)' }
-    ],
-    applyCategory: 'mobilitaet',
-    enabled: true
-  }
-];
+// Shared with the server so new profiles and the preset loader use the same catalog.
+export const DEFAULT_RULES = standardRules.rules as CategoryRule[];
 
 export async function initDatabaseDefaults() {
   const catCount = await db.categories.count();

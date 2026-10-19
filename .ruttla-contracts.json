@@ -11,9 +11,12 @@
         "server/db.js",
         "server/index.js",
         "server/profileSecurity.js",
+        "src/lib/standardRules.json",
         "tests/helpers/evidence.mjs",
+        "tests/helpers/presets.mjs",
         "tests/helpers/server.mjs",
-        "tests/server-pin.test.mjs"
+        "tests/server-pin.test.mjs",
+        "tests/standard-rules.test.mjs"
       ],
       "required_cases": [
         "public_profile_access",
@@ -36,6 +39,7 @@
         "postcss.config.js",
         "scripts/check-quality.py",
         "scripts/test-browser.mjs",
+        "scripts/test-categorization.mjs",
         "server/db.js",
         "server/index.js",
         "server/profileSecurity.js",
@@ -60,15 +64,19 @@
         "src/lib/db.ts",
         "src/lib/passkey.ts",
         "src/lib/rulesEngine.ts",
+        "src/lib/standardRules.json",
         "src/lib/statistics.ts",
         "src/main.tsx",
         "src/tests/csvParser.test.ts",
+        "src/tests/rulesEngine.test.ts",
         "src/tests/statistics.test.ts",
         "src/types/index.ts",
         "src/version.ts",
         "tailwind.config.js",
         "tests/helpers/evidence.mjs",
+        "tests/helpers/presets.mjs",
         "tests/helpers/server.mjs",
+        "tests/standard-rules.test.mjs",
         "tsconfig.json",
         "vite.config.ts"
       ],
@@ -94,7 +102,24 @@
         "pin_layout_390x420_dark",
         "pin_layout_390x844_dark",
         "pin_layout_768x1024_dark",
-        "pin_layout_1440x900_dark"
+        "pin_layout_1440x900_dark",
+        "preset_load_retry_idempotent",
+        "uncategorized_all_archives",
+        "transaction_filters_combine",
+        "apply_rules_feedback_preserves_categories",
+        "uncategorized_edit_keeps_filters",
+        "categorization_layout_320x568_light",
+        "categorization_layout_360x640_light",
+        "categorization_layout_390x420_light",
+        "categorization_layout_390x844_light",
+        "categorization_layout_768x1024_light",
+        "categorization_layout_1440x900_light",
+        "categorization_layout_320x568_dark",
+        "categorization_layout_360x640_dark",
+        "categorization_layout_390x420_dark",
+        "categorization_layout_390x844_dark",
+        "categorization_layout_768x1024_dark",
+        "categorization_layout_1440x900_dark"
       ]
     }
   ]

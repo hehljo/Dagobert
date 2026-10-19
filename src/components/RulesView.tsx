@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { Plus, Sparkles, Trash2, Play, Check } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Plus, Sparkles, Trash2, Play, Check, Download } from 'lucide-react';
 import type { CategoryRule, Category, Transaction } from '../types/index.ts';
 import { evaluateRules } from '../lib/rulesEngine.ts';
-import { createCategoryRule, deleteCategoryRuleScoped, updateExistingTransaction } from '../lib/api.ts';
+import { createCategoryRule, deleteCategoryRuleScoped, loadStandardCategoryRules, updateExistingTransaction } from '../lib/api.ts';
 import { CategoryIcon } from './CategoryIcon.tsx';
 
 interface RulesViewProps {
@@ -10,7 +10,7 @@ interface RulesViewProps {
   rules: CategoryRule[];
   categories: Category[];
   transactions: Transaction[];
-  onRulesUpdated: () => void;
+  onRulesUpdated: () => void | Promise<void>;
 }
 
 export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rules, categories, transactions, onRulesUpdated }) => {
@@ -21,6 +21,9 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
   const [value, setValue] = useState('');
   const [targetCategory, setTargetCategory] = useState(categories[0]?.id || 'lebensmittel');
   const [isApplying, setIsApplying] = useState(false);
+  const [isLoadingDefaults, setIsLoadingDefaults] = useState(false);
+  const [feedback, setFeedback] = useState<{ text: string; error: boolean } | null>(null);
+  const operationPending = useRef(false);
 
   const catMap = new Map(categories.map(c => [c.id, c]));
 
@@ -59,21 +62,50 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
   };
 
   const handleApplyRulesToExisting = async () => {
+    if (operationPending.current) return;
+    operationPending.current = true;
     setIsApplying(true);
+    setFeedback(null);
+    let updatedCount = 0;
     try {
-      let updatedCount = 0;
       for (const tx of transactions) {
-        const { category } = evaluateRules(tx, rules);
-        if (category && category !== tx.category && tx.id !== undefined) {
+        if (tx.category !== 'sonstiges') continue;
+        const { category, matchedRule } = evaluateRules(tx, rules);
+        if (matchedRule && category !== 'sonstiges' && tx.id !== undefined) {
           await updateExistingTransaction(tx.id, { category });
           updatedCount++;
         }
       }
 
-      alert(`Erfolgreich ausgeführt! ${updatedCount} Buchungen neu kategorisiert.`);
-      onRulesUpdated();
+      setFeedback({ text: `${updatedCount.toLocaleString('de-DE')} Buchungen neu kategorisiert.`, error: false });
+    } catch {
+      setFeedback({ text: `Anwenden abgebrochen. ${updatedCount.toLocaleString('de-DE')} Buchungen neu kategorisiert. Bitte erneut versuchen.`, error: true });
     } finally {
+      await onRulesUpdated();
       setIsApplying(false);
+      operationPending.current = false;
+    }
+  };
+
+  const handleLoadDefaults = async () => {
+    if (operationPending.current) return;
+    operationPending.current = true;
+    setIsLoadingDefaults(true);
+    setFeedback(null);
+    try {
+      const { inserted, updated } = await loadStandardCategoryRules(profileId);
+      setFeedback({
+        text: inserted || updated
+          ? `${inserted.toLocaleString('de-DE')} Standard-Regeln ergänzt, ${updated.toLocaleString('de-DE')} aktualisiert.`
+          : 'Standard-Regeln sind aktuell. Eigene Anpassungen bleiben erhalten.',
+        error: false
+      });
+      await onRulesUpdated();
+    } catch {
+      setFeedback({ text: 'Standard-Regeln konnten nicht geladen werden. Bitte erneut versuchen.', error: true });
+    } finally {
+      setIsLoadingDefaults(false);
+      operationPending.current = false;
     }
   };
 
@@ -88,28 +120,46 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
           </h2>
           <p className="text-xs text-ios-gray mt-1">
             Regeln erkennen Empfänger und Buchungstexte beim CSV-Import automatisch.
+            Beim Anwenden werden nur unkategorisierte Buchungen im aktiven Profil über alle Monate ergänzt.
           </p>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2 sm:max-w-md">
+          <button
+            onClick={handleLoadDefaults}
+            aria-label={isLoadingDefaults ? 'Standard-Regeln werden geladen…' : 'Standard-Regeln laden / aktualisieren'}
+            disabled={isLoadingDefaults || isApplying}
+            className="flex items-center gap-1.5 min-h-[48px] px-3.5 py-2.5 rounded-2xl text-xs font-semibold bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 transition-colors disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ios-tint"
+          >
+            <Download className="w-4 h-4 shrink-0" />
+            <span>{isLoadingDefaults ? 'Standard-Regeln werden geladen…' : 'Standard-Regeln laden / aktualisieren'}</span>
+          </button>
           <button
             onClick={handleApplyRulesToExisting}
-            disabled={isApplying}
-            className="flex items-center space-x-1.5 px-3.5 py-2.5 rounded-2xl text-xs font-semibold bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 transition-colors"
+            aria-label={isApplying ? 'Wird angewendet…' : 'Regeln anwenden'}
+            disabled={isApplying || isLoadingDefaults}
+            className="flex items-center space-x-1.5 min-h-[48px] px-3.5 py-2.5 rounded-2xl text-xs font-semibold bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 transition-colors disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ios-tint"
           >
             <Play className="w-3.5 h-3.5 text-ios-tint" />
-            <span>{isApplying ? 'Wird angewendet...' : 'Auf alle anwenden'}</span>
+            <span>{isApplying ? 'Wird angewendet…' : 'Regeln anwenden'}</span>
           </button>
 
           <button
             onClick={() => setIsCreating(true)}
-            className="flex items-center space-x-1.5 px-4 py-2.5 rounded-2xl text-xs font-semibold bg-ios-tint text-white shadow-sm hover:brightness-110 active:scale-95 transition-all"
+            disabled={isApplying || isLoadingDefaults}
+            className="flex items-center space-x-1.5 min-h-[48px] px-4 py-2.5 rounded-2xl text-xs font-semibold bg-ios-tint text-white shadow-sm hover:brightness-110 active:scale-95 transition-all disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ios-tint"
           >
             <Plus className="w-4 h-4" />
             <span>Neue Regel</span>
           </button>
         </div>
       </div>
+
+      {feedback && (
+        <p role={feedback.error ? 'alert' : 'status'} className={`rounded-2xl p-4 text-sm ${feedback.error ? 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-200' : 'bg-slate-100 text-slate-800 dark:bg-neutral-800 dark:text-slate-200'}`}>
+          {feedback.text}
+        </p>
+      )}
 
       {/* Create Rule Modal / Form */}
       {isCreating && (
@@ -190,6 +240,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
           <div className="flex justify-end pt-2">
             <button
               onClick={handleAddRule}
+              disabled={isApplying || isLoadingDefaults}
               className="px-5 py-2.5 rounded-xl bg-ios-tint text-white font-semibold text-xs shadow-sm hover:brightness-110 active:scale-95"
             >
               Regel speichern
@@ -216,6 +267,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
               <div className="min-w-0 flex items-center space-x-3">
                 <button
                   onClick={() => handleToggleRule(rule)}
+                  disabled={isApplying || isLoadingDefaults}
                   className={`w-6 h-6 rounded-lg flex items-center justify-center transition-colors flex-shrink-0 ${
                     rule.enabled ? 'bg-ios-tint text-white' : 'border border-slate-300 dark:border-neutral-700'
                   }`}
@@ -248,6 +300,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
 
                 <button
                   onClick={() => handleDeleteRule(rule.id)}
+                  disabled={isApplying || isLoadingDefaults}
                   className="p-2 text-slate-400 hover:text-ios-red transition-colors"
                   title="Regel löschen"
                 >

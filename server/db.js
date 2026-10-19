@@ -1,3 +1,4 @@
+import standardRules from '../src/lib/standardRules.json' with { type: 'json' };
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
@@ -185,57 +186,6 @@ export function seedProfileDefaults(profileId) {
     date_format: 'DD.MM.YYYY'
   };
 
-  const DEFAULT_RULES = [
-    {
-      id: 'rule-gehalt',
-      name: 'Gehalt / Salär',
-      priority: 10,
-      conditions: JSON.stringify([{ field: 'purpose', operator: 'contains', value: 'Gehalt' }]),
-      apply_category: 'gehalt',
-      enabled: 1
-    },
-    {
-      id: 'rule-supermarkt',
-      name: 'Supermärkte & Discounter',
-      priority: 20,
-      conditions: JSON.stringify([{ field: 'rawText', operator: 'regex', value: '(REWE|EDEKA|ALDI|LIDL|KAUFLAND|PENNY|NETTO|DENNS)' }]),
-      apply_category: 'lebensmittel',
-      enabled: 1
-    },
-    {
-      id: 'rule-drogerie',
-      name: 'Drogerie & Pflege',
-      priority: 25,
-      conditions: JSON.stringify([{ field: 'rawText', operator: 'regex', value: '(DM-DROGERIE|ROSSMANN|MUELLER)' }]),
-      apply_category: 'gesundheit',
-      enabled: 1
-    },
-    {
-      id: 'rule-tanken',
-      name: 'Tanken & Ladestrom',
-      priority: 30,
-      conditions: JSON.stringify([{ field: 'rawText', operator: 'regex', value: '(ARAL|SHELL|TOTAL|JET|ESSO|ENBW|IONITY|TESLA)' }]),
-      apply_category: 'mobilitaet',
-      enabled: 1
-    },
-    {
-      id: 'rule-abos',
-      name: 'Streaming & Software',
-      priority: 35,
-      conditions: JSON.stringify([{ field: 'rawText', operator: 'regex', value: '(NETFLIX|SPOTIFY|APPLE|GOOGLE|AMAZON PRIME|DISNEY|OPENAI|GITHUB)' }]),
-      apply_category: 'abos',
-      enabled: 1
-    },
-    {
-      id: 'rule-bahn',
-      name: 'Bahn & ÖPNV',
-      priority: 40,
-      conditions: JSON.stringify([{ field: 'rawText', operator: 'regex', value: '(DEUTSCHE BAHN|DB VERTRIEB|AVV|MVG)' }]),
-      apply_category: 'mobilitaet',
-      enabled: 1
-    }
-  ];
-
   const insertAccount = db.prepare(`
     INSERT OR IGNORE INTO accounts (id, profile_id, name, initial_balance, initial_balance_date)
     VALUES (?, ?, ?, ?, ?)
@@ -254,8 +204,8 @@ export function seedProfileDefaults(profileId) {
     INSERT OR IGNORE INTO rules (id, profile_id, name, priority, conditions, apply_category, enabled)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
-  for (const r of DEFAULT_RULES) {
-    insertRule.run(r.id, profileId, r.name, r.priority, r.conditions, r.apply_category, r.enabled);
+  for (const r of standardRules.rules) {
+    insertRule.run(r.id, profileId, r.name, r.priority, JSON.stringify(r.conditions), r.applyCategory, r.enabled ? 1 : 0);
   }
 
   const insertTemplate = db.prepare(`
@@ -274,6 +224,41 @@ export function seedProfileDefaults(profileId) {
     DEFAULT_TEMPLATE.text_parser,
     DEFAULT_TEMPLATE.date_format
   );
+}
+
+// Add missing presets atomically; only migrate known, unedited older presets.
+// The enabled flag is deliberately preserved, including for legacy defaults.
+export function loadStandardRules(profileId) {
+  const sameDefinition = (stored, preset) => {
+    const conditions = JSON.parse(stored.conditions);
+    return stored.name === preset.name && stored.priority === preset.priority &&
+      stored.apply_category === preset.applyCategory &&
+      conditions.length === preset.conditions.length &&
+      conditions.every((condition, i) => {
+        const expected = preset.conditions[i];
+        return condition.field === expected.field && condition.operator === expected.operator && condition.value === expected.value;
+      });
+  };
+  return db.transaction(() => {
+    let inserted = 0;
+    let updated = 0;
+    const find = db.prepare('SELECT * FROM rules WHERE id = ? AND profile_id = ?');
+    const insert = db.prepare(`INSERT INTO rules (id, profile_id, name, priority, conditions, apply_category, enabled)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    const update = db.prepare(`UPDATE rules SET name = ?, priority = ?, conditions = ?, apply_category = ?
+      WHERE id = ? AND profile_id = ?`);
+    for (const preset of standardRules.rules) {
+      const existing = find.get(preset.id, profileId);
+      if (!existing) {
+        insert.run(preset.id, profileId, preset.name, preset.priority, JSON.stringify(preset.conditions), preset.applyCategory, preset.enabled ? 1 : 0);
+        inserted++;
+      } else if (standardRules.previousVersions.some(previous => previous.id === preset.id && sameDefinition(existing, previous))) {
+        update.run(preset.name, preset.priority, JSON.stringify(preset.conditions), preset.applyCategory, preset.id, profileId);
+        updated++;
+      }
+    }
+    return { inserted, updated };
+  })();
 }
 
 export function hashPinServer(pin) {

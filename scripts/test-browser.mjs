@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { chromium } from 'playwright';
 import { startTestServer, request } from '../tests/helpers/server.mjs';
 import { writeTestResult } from '../tests/helpers/evidence.mjs';
+import { testCategorization } from './test-categorization.mjs';
 
 const server = await startTestServer();
 let browser;
@@ -220,6 +221,7 @@ try {
   assert.equal(await switchPage.getByText('Testladen 0', { exact: true }).count(), 0);
   record('profile_switch_retry_isolation', 'Profilwechsel: Netzwerkfehler abfangen, erneut entsperren, vorherige Profildaten entfernt');
   await switchContext.close();
+  await testCategorization({ api, newContext, record, url: server.url });
   assert.deepEqual(errors, [], 'Keine JavaScript- oder React-Hook-Fehler');
   complete = true;
   console.log(`BROWSER_RESULT checks=${checks} errors=${errors.length}; echte lokale Test-API, injizierte Verbindungsfehler`);

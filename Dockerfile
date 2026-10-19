@@ -6,6 +6,7 @@ RUN npm ci --omit=dev
 
 COPY dist ./dist
 COPY server ./server
+COPY src/lib/standardRules.json ./src/lib/standardRules.json
 
 ENV PORT=5052
 ENV DATA_DIR=/app/data

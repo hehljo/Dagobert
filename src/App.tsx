@@ -78,9 +78,11 @@ function UnlockedApp() {
   }, []);
 
   // Load data for active profile with race-condition prevention and silent background sync
-  const loadData = useCallback(async (profileId: string, isSilent = false) => {
+  const loadData = useCallback(async (profileId: string, mode: 'initial' | 'background' | 'mutation' = 'initial') => {
+    const isSilent = mode !== 'initial';
     // Background sync must not interrupt the first load of a profile.
-    if (isSilent && (loadedProfileIdRef.current !== profileId || pendingDataLoadRef.current)) return;
+    if (isSilent && loadedProfileIdRef.current !== profileId) return;
+    if (mode === 'background' && pendingDataLoadRef.current) return;
     const loadId = ++activeLoadIdRef.current;
     pendingDataLoadRef.current = true;
     if (!isSilent) {
@@ -157,7 +159,7 @@ function UnlockedApp() {
 
     const handleSync = () => {
       if (!document.hidden && activeProfile) {
-        loadData(activeProfile.id, true); // silent background sync!
+        loadData(activeProfile.id, 'background');
       }
     };
 
@@ -305,7 +307,7 @@ function UnlockedApp() {
             categories={categories}
             transactions={transactions}
             onRulesUpdated={() => {
-              if (activeProfile) loadData(activeProfile.id);
+              if (activeProfile) return loadData(activeProfile.id, 'mutation');
             }}
           />
         )}
@@ -371,12 +373,12 @@ function UnlockedApp() {
           } else {
             await createManualTransaction(activeProfile.id, tx);
           }
-          await loadData(activeProfile.id);
+          await loadData(activeProfile.id, 'mutation');
         }}
         onDelete={async (id) => {
           if (!activeProfile) return;
           await deleteExistingTransaction(id);
-          await loadData(activeProfile.id);
+          await loadData(activeProfile.id, 'mutation');
         }}
       />}
     </div>
