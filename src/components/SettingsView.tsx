@@ -1,21 +1,23 @@
-import type { Account } from '../types/index.ts';
+import type { Account, Category } from '../types/index.ts';
 import React, { useState } from 'react';
-import { Download, Upload, Trash2, Shield, Moon, Sun, Database, Sparkles, Fingerprint, KeyRound, Lock, Check, Landmark } from 'lucide-react';
+import { Download, Upload, Trash2, Shield, Moon, Sun, Database, Sparkles, Fingerprint, KeyRound, Lock, Check, Landmark, Tag, Plus, X } from 'lucide-react';
 // db helpers
 import { parseGermanAmount } from '../lib/csvParser.ts';
-import { updateAccountSettings, exportProfileBackup, importProfileBackup, resetProfileData, batchImportTransactions } from '../lib/api.ts';
+import { updateAccountSettings, exportProfileBackup, importProfileBackup, resetProfileData, batchImportTransactions, createCategory, deleteCategory } from '../lib/api.ts';
 import { APP_VERSION, BUILD_DATE } from '../version.ts';
 import { getSecurityConfig, saveSecurityConfig, registerPasskey, isPasskeySupported, hashPin, type SecurityConfig } from '../lib/passkey.ts';
+import { CategoryIcon, AVAILABLE_CATEGORY_ICONS, AVAILABLE_CATEGORY_COLORS } from './CategoryIcon.tsx';
 
 interface SettingsViewProps {
   profileId?: string;
   account?: Account;
+  categories?: Category[];
   isDark: boolean;
   onToggleDark: () => void;
   onDataChanged: () => void;
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark, onDataChanged, account, profileId = 'privat' }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark, onDataChanged, account, categories = [], profileId = 'privat' }) => {
   const [isExporting, setIsExporting] = useState(false);
   const [security, setSecurity] = useState<SecurityConfig>(getSecurityConfig());
   const [pinInput, setPinInput] = useState('');
@@ -27,6 +29,49 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
     account?.checkpointBalance !== undefined ? account.checkpointBalance.toFixed(2).replace('.', ',') : ''
   );
   const [checkpointDateInput, setCheckpointDateInput] = useState(account?.checkpointDate || '');
+
+  // Category management state
+  const [showAddCategory, setShowAddCategory] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatType, setNewCatType] = useState<'expense' | 'income' | 'transfer'>('expense');
+  const [newCatColor, setNewCatColor] = useState(AVAILABLE_CATEGORY_COLORS[0]);
+  const [newCatIcon, setNewCatIcon] = useState(AVAILABLE_CATEGORY_ICONS[0]);
+  const [isSavingCategory, setIsSavingCategory] = useState(false);
+
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCatName.trim()) {
+      alert('Bitte einen Kategorienamen eingeben.');
+      return;
+    }
+    setIsSavingCategory(true);
+    try {
+      await createCategory(profileId, {
+        name: newCatName.trim(),
+        type: newCatType,
+        color: newCatColor,
+        icon: newCatIcon
+      });
+      setNewCatName('');
+      setShowAddCategory(false);
+      onDataChanged();
+    } catch (err: any) {
+      alert(err.message || 'Fehler beim Speichern der Kategorie');
+    } finally {
+      setIsSavingCategory(false);
+    }
+  };
+
+  const handleDeleteCategory = async (catId: string, catName: string) => {
+    if (confirm(`Kategorie "${catName}" wirklich löschen? Alle zugeordneten Buchungen werden auf "Sonstiges" umgestellt.`)) {
+      try {
+        await deleteCategory(profileId, catId);
+        onDataChanged();
+      } catch (err: any) {
+        alert(err.message || 'Fehler beim Löschen');
+      }
+    }
+  };
 
   const handleSaveAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -470,6 +515,148 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
             Kontoeinstellungen speichern
           </button>
         </form>
+      </div>
+
+      {/* Categories Management */}
+      <div className="bg-white dark:bg-ios-darkCard rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <Tag className="w-4 h-4 text-ios-tint" />
+            <h3 className="font-bold text-sm text-slate-900 dark:text-white">Kategorien ({categories.length})</h3>
+          </div>
+          <button
+            onClick={() => setShowAddCategory(!showAddCategory)}
+            className="flex items-center space-x-1 px-3 py-1.5 bg-ios-tint/10 hover:bg-ios-tint/20 text-ios-tint rounded-xl text-xs font-semibold transition-colors active:scale-95"
+          >
+            {showAddCategory ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+            <span>{showAddCategory ? 'Abbrechen' : 'Neue Kategorie'}</span>
+          </button>
+        </div>
+
+        {/* Add Category Form */}
+        {showAddCategory && (
+          <form onSubmit={handleCreateCategory} className="p-4 bg-slate-50 dark:bg-neutral-800/60 rounded-2xl space-y-4 border border-ios-separator dark:border-ios-darkSeparator animate-fade-in text-xs">
+            <h4 className="font-semibold text-slate-900 dark:text-white">Neue Kategorie erstellen</h4>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="font-semibold text-ios-gray block mb-1">Name</label>
+                <input
+                  type="text"
+                  placeholder="z. B. Haustier, Garten, Hobby..."
+                  value={newCatName}
+                  onChange={(e) => setNewCatName(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-neutral-700 rounded-xl outline-none text-sm text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-ios-gray block mb-1">Kategorie-Typ</label>
+                <select
+                  value={newCatType}
+                  onChange={(e) => setNewCatType(e.target.value as any)}
+                  className="w-full px-3 py-2 bg-white dark:bg-neutral-700 rounded-xl outline-none text-sm text-slate-900 dark:text-white"
+                >
+                  <option value="expense">Ausgabe</option>
+                  <option value="income">Einnahme</option>
+                  <option value="transfer">Umbuchung / Investieren</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Color Palette */}
+            <div>
+              <label className="font-semibold text-ios-gray block mb-1.5">Farbe</label>
+              <div className="flex flex-wrap gap-2">
+                {AVAILABLE_CATEGORY_COLORS.map((col) => (
+                  <button
+                    key={col}
+                    type="button"
+                    aria-label={`Farbe ${col}`}
+                    onClick={() => setNewCatColor(col)}
+                    className={`w-7 h-7 rounded-full transition-transform ${newCatColor === col ? 'scale-125 ring-2 ring-ios-tint ring-offset-2 dark:ring-offset-neutral-800' : 'hover:scale-110'}`}
+                    style={{ backgroundColor: col }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Icon Picker */}
+            <div>
+              <label className="font-semibold text-ios-gray block mb-1.5">Symbol</label>
+              <div className="grid grid-cols-6 sm:grid-cols-11 gap-1.5 max-h-36 overflow-y-auto p-1.5 bg-white dark:bg-neutral-700 rounded-xl border border-ios-separator dark:border-ios-darkSeparator">
+                {AVAILABLE_CATEGORY_ICONS.map((ic) => (
+                  <button
+                    key={ic}
+                    type="button"
+                    aria-label={`Symbol ${ic}`}
+                    onClick={() => setNewCatIcon(ic)}
+                    className={`p-2 rounded-lg flex items-center justify-center transition-colors ${
+                      newCatIcon === ic
+                        ? 'bg-ios-tint text-white shadow-sm'
+                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-neutral-600'
+                    }`}
+                  >
+                    <CategoryIcon name={ic} className="w-4 h-4" />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowAddCategory(false)}
+                className="px-3 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-neutral-700 font-semibold"
+              >
+                Abbrechen
+              </button>
+              <button
+                type="submit"
+                disabled={isSavingCategory || !newCatName.trim()}
+                className="px-4 py-2 bg-ios-tint text-white rounded-xl font-semibold disabled:opacity-50 hover:brightness-110 active:scale-95"
+              >
+                {isSavingCategory ? 'Wird gespeichert...' : 'Kategorie anlegen'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Existing Categories Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+          {categories.map((cat) => (
+            <div
+              key={cat.id}
+              className="flex items-center justify-between p-2.5 rounded-2xl bg-slate-50 dark:bg-neutral-800/40 border border-ios-separator dark:border-ios-darkSeparator"
+            >
+              <div className="flex items-center space-x-2.5 min-w-0">
+                <div
+                  className="w-8 h-8 rounded-xl flex items-center justify-center text-white flex-shrink-0"
+                  style={{ backgroundColor: cat.color }}
+                >
+                  <CategoryIcon name={cat.icon} className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-slate-900 dark:text-white truncate">{cat.name}</p>
+                  <span className="text-[10px] text-ios-gray">
+                    {cat.type === 'income' ? 'Einnahme' : cat.type === 'transfer' ? 'Umbuchung' : 'Ausgabe'}
+                  </span>
+                </div>
+              </div>
+
+              {cat.id !== 'sonstiges' && (
+                <button
+                  type="button"
+                  onClick={() => handleDeleteCategory(cat.id, cat.name)}
+                  aria-label={`Kategorie ${cat.name} löschen`}
+                  className="p-1.5 text-ios-gray hover:text-ios-red rounded-lg transition-colors ml-1"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Theme & Display */}

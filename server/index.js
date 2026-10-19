@@ -445,6 +445,53 @@ app.delete('/api/rules/:id', requireAccess(req => req.query.profileId || req.bod
   res.json({ success: true });
 });
 
+app.post('/api/categories', (req, res) => {
+  const { profileId, category } = req.body;
+  if (!profileId || !category || !category.name) {
+    return res.status(400).json({ error: 'profileId und category.name sind erforderlich' });
+  }
+
+  const name = category.name.trim();
+  const id = category.id || name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 24) + '-' + Date.now().toString(36).slice(-4);
+  const icon = category.icon || 'Tag';
+  const color = category.color || '#30D158';
+  const type = category.type || 'expense';
+  const budget = typeof category.budget === 'number' && !isNaN(category.budget) ? category.budget : null;
+
+  db.prepare(`
+    INSERT INTO categories (id, profile_id, name, icon, color, type, budget)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id, profile_id) DO UPDATE SET
+      name = excluded.name,
+      icon = excluded.icon,
+      color = excluded.color,
+      type = excluded.type,
+      budget = excluded.budget
+  `).run(id, profileId, name, icon, color, type, budget);
+
+  res.json({ success: true, category: { id, name, icon, color, type, budget } });
+});
+
+app.delete('/api/categories/:id', (req, res) => {
+  const { id } = req.params;
+  const profileId = req.query.profileId || req.body?.profileId;
+  if (!profileId) {
+    return res.status(400).json({ error: 'profileId ist erforderlich' });
+  }
+
+  // Fallback existing transactions to 'sonstiges'
+  db.prepare(`
+    UPDATE transactions
+    SET category = 'sonstiges'
+    WHERE category = ? AND profile_id = ?
+  `).run(id, profileId);
+
+  // Delete category
+  db.prepare('DELETE FROM categories WHERE id = ? AND profile_id = ?').run(id, profileId);
+
+  res.json({ success: true });
+});
+
 
 // ----------------------------------------------------
 // Server-Side Backup & Restore Endpoints

@@ -19,8 +19,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onTabChange, tx
   ];
 
   return (
-    <nav className="w-full flex-shrink-0 z-30 backdrop-blur-2xl bg-white/85 dark:bg-neutral-900/85 border-t border-ios-separator dark:border-ios-darkSeparator pb-[max(env(safe-area-inset-bottom,0px),0.5rem)] transition-colors">
-      <div className="max-w-md mx-auto grid grid-cols-5 items-center h-16 px-1 sm:px-2">
+    <nav className="w-full flex-shrink-0 z-30 backdrop-blur-2xl bg-white/85 dark:bg-neutral-900/85 border-t border-ios-separator dark:border-ios-darkSeparator pt-1 pb-[env(safe-area-inset-bottom,0px)] transition-colors">
+      <div className="max-w-md mx-auto grid grid-cols-5 items-center h-[50px] px-1 sm:px-2">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -30,19 +30,19 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onTabChange, tx
               onClick={() => onTabChange(tab.id)}
               aria-label={tab.label}
               aria-current={isActive ? 'page' : undefined}
-              className={`min-w-0 min-h-[48px] flex flex-col items-center justify-center relative py-1 transition-transform active:scale-90 ${
+              className={`min-w-0 flex flex-col items-center justify-center relative py-0.5 transition-transform active:scale-95 ${
                 isActive ? 'text-ios-tint font-semibold' : 'text-ios-gray hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
               <div className="relative">
-                <Icon className={`w-5 h-5 transition-transform ${isActive ? 'scale-110' : ''}`} />
+                <Icon className={`w-5 h-5 transition-transform ${isActive ? 'scale-105' : ''}`} />
                 {tab.badge !== undefined && tab.badge > 0 && (
                   <span className="absolute -top-1 -right-2.5 px-1.5 py-0.2 min-w-4 text-[10px] font-bold rounded-full bg-ios-tint text-white flex items-center justify-center">
                     {tab.badge > 99 ? '99+' : tab.badge}
                   </span>
                 )}
               </div>
-              <span className="text-[10px] sm:text-[11px] mt-1 tracking-tight">{tab.label}</span>
+              <span className="text-[10px] sm:text-[11px] mt-0.5 tracking-tight font-medium">{tab.label}</span>
             </button>
           );
         })}

@@ -145,6 +145,27 @@ export async function deleteCategoryRuleScoped(profileId: string, id: string): P
   if (!res.ok) throw new Error('Fehler beim Löschen der Regel');
 }
 
+export async function createCategory(profileId: string, category: Partial<Category>): Promise<Category> {
+  const res = await fetch(`${BASE_URL}/api/categories`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profileId, category })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Fehler beim Speichern der Kategorie');
+  }
+  const data = await res.json();
+  return data.category;
+}
+
+export async function deleteCategory(profileId: string, id: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/categories/${encodeURIComponent(id)}?profileId=${encodeURIComponent(profileId)}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) throw new Error('Fehler beim Löschen der Kategorie');
+}
+
 export async function exportProfileBackup(profileId: string): Promise<any> {
   const res = await fetch(`${BASE_URL}/api/backup?profileId=${encodeURIComponent(profileId)}`);
   if (!res.ok) throw new Error('Fehler beim Exportieren des Backups');

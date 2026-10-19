@@ -316,6 +316,7 @@ function UnlockedApp() {
           <SettingsView
             profileId={activeProfile?.id || 'privat'}
             account={activeAccount}
+            categories={categories}
             isDark={isDark}
             onToggleDark={toggleDarkMode}
             onDataChanged={() => {
