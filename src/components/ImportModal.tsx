@@ -58,10 +58,18 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
       // 3. Extract balance metadata
       const meta = extractComdirectMetadata(text);
-      setCsvMetadata(meta);
 
       // 4. Parse CSV
       const rawParsed = parseBankCsv(text, selectedTemplate, existingHashes);
+
+      // If balance exists but endDate was not explicit, take newest transaction date
+      if (meta.newBalance !== undefined && !meta.endDate && rawParsed.length > 0) {
+        const dates = rawParsed.map(r => r.date).filter(Boolean);
+        if (dates.length > 0) {
+          meta.endDate = dates.reduce((max, d) => d > max ? d : max, dates[0]);
+        }
+      }
+      setCsvMetadata(meta);
 
       // 5. Detect pending promotions with queue (Vorgemerkt in DB -> Jetzt Gebucht in CSV)
       const pendingMap = new Map<string, Transaction[]>();

@@ -237,14 +237,29 @@ app.post('/api/transactions/batch', bodyProfileAccess, (req, res) => {
   `);
 
   const txRunner = db.transaction(() => {
-    // 1. Account Checkpoint update if provided and newer
-    if (accountCheckpoint?.newBalance !== undefined && accountCheckpoint?.endDate) {
+    // 1. Account Checkpoint update if provided and valid
+    if (accountCheckpoint?.newBalance !== undefined && Number.isFinite(Number(accountCheckpoint.newBalance))) {
+      const balance = Number(accountCheckpoint.newBalance);
+
+      // Resolve checkpoint date: provided endDate, or max transaction date in batch, or max date in DB, or today
+      let checkpointDate = accountCheckpoint.endDate;
+      if (!checkpointDate && transactions && transactions.length > 0) {
+        const dates = transactions.map(t => t.date).filter(Boolean);
+        if (dates.length > 0) {
+          checkpointDate = dates.reduce((max, d) => d > max ? d : max, dates[0]);
+        }
+      }
+      if (!checkpointDate) {
+        const latestTx = db.prepare('SELECT MAX(date) as max_date FROM transactions WHERE profile_id = ?').get(profileId);
+        checkpointDate = latestTx?.max_date || new Date().toISOString().slice(0, 10);
+      }
+
       const acc = db.prepare('SELECT checkpoint_date FROM accounts WHERE id = ? AND profile_id = ?').get('comdirect', profileId);
       if (acc) {
-        if (!acc.checkpoint_date || accountCheckpoint.endDate >= acc.checkpoint_date) {
+        if (!acc.checkpoint_date || checkpointDate >= acc.checkpoint_date) {
           updateCheckpoint.run(
-            accountCheckpoint.newBalance,
-            accountCheckpoint.endDate,
+            balance,
+            checkpointDate,
             accountCheckpoint.iban || null,
             'comdirect',
             profileId
@@ -375,14 +390,25 @@ app.delete('/api/transactions/:id', transactionAccess, (req, res) => {
 
 app.put('/api/accounts/:id', bodyProfileAccess, (req, res) => {
   const { id } = req.params;
-  const { profileId, initialBalance, initialBalanceDate } = req.body;
+  const { profileId, initialBalance, initialBalanceDate, checkpointBalance, checkpointDate } = req.body;
 
   db.prepare(`
     UPDATE accounts
     SET initial_balance = COALESCE(?, initial_balance),
-        initial_balance_date = COALESCE(?, initial_balance_date)
+        initial_balance_date = COALESCE(?, initial_balance_date),
+        checkpoint_balance = CASE WHEN ? IS NOT NULL THEN ? ELSE checkpoint_balance END,
+        checkpoint_date = CASE WHEN ? IS NOT NULL THEN ? ELSE checkpoint_date END
     WHERE id = ? AND profile_id = ?
-  `).run(initialBalance, initialBalanceDate, id, profileId);
+  `).run(
+    initialBalance,
+    initialBalanceDate,
+    checkpointBalance !== undefined ? checkpointBalance : null,
+    checkpointBalance !== undefined ? checkpointBalance : null,
+    checkpointDate !== undefined ? checkpointDate : null,
+    checkpointDate !== undefined ? checkpointDate : null,
+    id,
+    profileId
+  );
 
   res.json({ success: true });
 });

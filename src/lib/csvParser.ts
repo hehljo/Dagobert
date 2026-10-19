@@ -291,33 +291,53 @@ export function extractComdirectMetadata(content: string): CsvMetadata {
   const metadataLines = [...preHeaderLines, ...footerLines];
   const metadataBlock = metadataLines.join('\n');
 
-  // Zeitraum: DD.MM.YYYY - DD.MM.YYYY
-  const zeitraumMatch = metadataBlock.match(/Zeitraum:\s*(\d{1,2}\.\d{1,2}\.\d{4})\s*-\s*(\d{1,2}\.\d{1,2}\.\d{4})/i);
+  // Zeitraum: DD.MM.YYYY - DD.MM.YYYY (supports colon, semicolon, quote, whitespace, 'vom ... bis')
+  const zeitraumMatch = metadataBlock.match(
+    /Zeitraum[^\d]*(\d{1,2}\.\d{1,2}\.\d{4})\s*(?:-|bis)\s*(\d{1,2}\.\d{1,2}\.\d{4})/i
+  );
   if (zeitraumMatch) {
     meta.startDate = parseGermanDate(zeitraumMatch[1]) || undefined;
     meta.endDate = parseGermanDate(zeitraumMatch[2]) || undefined;
   }
 
-  // Neuer Kontostand (strictly only if line starts with Neuer Kontostand)
+  // Fallback: Stand / per / Stichtag
+  if (!meta.endDate) {
+    const standMatch = metadataBlock.match(/(?:Stand|per|Stichtag|Datum)[":;\s]+(\d{1,2}\.\d{1,2}\.\d{4})/i);
+    if (standMatch) {
+      meta.endDate = parseGermanDate(standMatch[1]) || undefined;
+    }
+  }
+
+  // Neuer Kontostand & Date in Neuer Kontostand line
   for (const line of metadataLines) {
-    const m = line.match(/^"?(?:Neuer Kontostand)[":;\s]+([0-9.,-]+)\s*(?:EUR|€)?/i);
-    if (m) {
-      const val = parseGermanAmount(m[1]);
-      if (val !== null) {
-        meta.newBalance = val;
-        break;
+    if (/Neuer Kontostand/i.test(line)) {
+      if (!meta.endDate) {
+        const dateMatch = line.match(/(\d{1,2}\.\d{1,2}\.\d{4})/);
+        if (dateMatch) {
+          meta.endDate = parseGermanDate(dateMatch[1]) || undefined;
+        }
+      }
+      const m = line.match(/Neuer Kontostand.*?([0-9.,-]+)\s*(?:EUR|€)/i) ||
+                line.match(/Neuer Kontostand[^\d-]*([0-9.,-]+)/i);
+      if (m && meta.newBalance === undefined) {
+        const val = parseGermanAmount(m[1]);
+        if (val !== null) {
+          meta.newBalance = val;
+        }
       }
     }
   }
 
   // Alter Kontostand
   for (const line of metadataLines) {
-    const m = line.match(/^"?(?:Alter Kontostand)[":;\s]+([0-9.,-]+)\s*(?:EUR|€)?/i);
-    if (m) {
-      const val = parseGermanAmount(m[1]);
-      if (val !== null) {
-        meta.oldBalance = val;
-        break;
+    if (/Alter Kontostand/i.test(line)) {
+      const m = line.match(/Alter Kontostand.*?([0-9.,-]+)\s*(?:EUR|€)/i) ||
+                line.match(/Alter Kontostand[^\d-]*([0-9.,-]+)/i);
+      if (m && meta.oldBalance === undefined) {
+        const val = parseGermanAmount(m[1]);
+        if (val !== null) {
+          meta.oldBalance = val;
+        }
       }
     }
   }

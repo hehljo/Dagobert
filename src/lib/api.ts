@@ -99,13 +99,15 @@ export async function deleteExistingTransaction(id: number): Promise<void> {
 export async function updateAccountSettings(
   profileId: string,
   id: string,
-  initialBalance: number,
-  initialBalanceDate: string
+  initialBalance?: number,
+  initialBalanceDate?: string,
+  checkpointBalance?: number | null,
+  checkpointDate?: string | null
 ): Promise<void> {
   const res = await fetch(`${BASE_URL}/api/accounts/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profileId, initialBalance, initialBalanceDate })
+    body: JSON.stringify({ profileId, initialBalance, initialBalanceDate, checkpointBalance, checkpointDate })
   });
   if (!res.ok) throw new Error('Fehler beim Aktualisieren des Kontos');
 }

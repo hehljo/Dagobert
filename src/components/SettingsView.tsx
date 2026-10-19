@@ -23,17 +23,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
   const [secNotice, setSecNotice] = useState<string | null>(null);
   const [initBalInput, setInitBalInput] = useState(account ? account.initialBalance.toFixed(2).replace('.', ',') : '0,00');
   const [initDateInput, setInitDateInput] = useState(account?.initialBalanceDate || '2026-01-01');
+  const [checkpointBalInput, setCheckpointBalInput] = useState(
+    account?.checkpointBalance !== undefined ? account.checkpointBalance.toFixed(2).replace('.', ',') : ''
+  );
+  const [checkpointDateInput, setCheckpointDateInput] = useState(account?.checkpointDate || '');
 
   const handleSaveAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     const val = parseGermanAmount(initBalInput);
     if (val === null) {
-      alert('Bitte einen gültigen Betrag eingeben (z. B. 2.500,00).');
+      alert('Bitte einen gültigen Betrag für den Startsaldo eingeben (z. B. 0,00).');
       return;
     }
+    const cpVal = checkpointBalInput.trim() ? parseGermanAmount(checkpointBalInput) : null;
+    if (checkpointBalInput.trim() && cpVal === null) {
+      alert('Bitte einen gültigen Betrag für den comdirect-Stichtagssaldo eingeben.');
+      return;
+    }
+    const cpDate = checkpointDateInput.trim() ? checkpointDateInput : null;
 
-    await updateAccountSettings(profileId, 'comdirect', val, initDateInput);
-    alert('Startsaldo erfolgreich gespeichert!');
+    await updateAccountSettings(profileId, 'comdirect', val, initDateInput, cpVal, cpDate);
+    alert('Kontoeinstellungen erfolgreich gespeichert!');
     onDataChanged();
   };
 
@@ -390,22 +400,47 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
           <span>Konto &amp; Startsaldo</span>
         </h3>
 
-        {account?.checkpointBalance !== undefined && (
-          <div className="p-3.5 bg-ios-tint/10 border border-ios-tint/20 rounded-2xl flex items-center justify-between text-xs">
-            <div>
-              <p className="font-semibold text-slate-900 dark:text-white">Automatischer comdirect-Stichtag</p>
-              <p className="text-ios-gray text-[11px]">Aus letztem CSV-Import ({account.checkpointDate})</p>
+        <form onSubmit={handleSaveAccount} className="space-y-4 text-xs">
+          {/* Stichtags-Saldo (comdirect Checkpoint) */}
+          <div className="p-3.5 bg-slate-50 dark:bg-neutral-800/40 border border-slate-200 dark:border-neutral-700/60 rounded-2xl space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-800 dark:text-slate-200">
+                comdirect-Stichtag &amp; Kontostand
+              </span>
+              <span className="text-[11px] text-ios-gray">
+                Wird automatisch per CSV gesetzt
+              </span>
             </div>
-            <span className="font-mono font-bold text-sm text-ios-tint">
-              {account.checkpointBalance.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
-            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="font-semibold text-ios-gray block mb-1">Kontostand laut Auszug</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="z.B. -215,30"
+                    value={checkpointBalInput}
+                    onChange={(e) => setCheckpointBalInput(e.target.value)}
+                    className="w-full px-3 py-2 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-xl outline-none font-mono text-sm"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-ios-gray font-semibold">€</span>
+                </div>
+              </div>
+              <div>
+                <label className="font-semibold text-ios-gray block mb-1">Stichtagsdatum</label>
+                <input
+                  type="date"
+                  value={checkpointDateInput}
+                  onChange={(e) => setCheckpointDateInput(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-xl outline-none"
+                />
+              </div>
+            </div>
           </div>
-        )}
 
-        <form onSubmit={handleSaveAccount} className="space-y-3 text-xs">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Startsaldo */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
             <div>
-              <label className="font-semibold text-ios-gray block mb-1">Manueller Startsaldo</label>
+              <label className="font-semibold text-ios-gray block mb-1">Startsaldo (vor erstem Stichtag)</label>
               <div className="relative">
                 <input
                   type="text"
@@ -430,9 +465,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
 
           <button
             type="submit"
-            className="px-4 py-2 bg-ios-tint text-white font-semibold rounded-xl text-xs shadow-sm hover:brightness-110 active:scale-95"
+            className="px-4 py-2.5 bg-ios-tint text-white font-semibold rounded-xl text-xs shadow-sm hover:brightness-110 active:scale-95"
           >
-            Startsaldo aktualisieren
+            Kontoeinstellungen speichern
           </button>
         </form>
       </div>
