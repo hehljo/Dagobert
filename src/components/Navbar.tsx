@@ -22,11 +22,11 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
         {/* Left: Brand + Profile Switcher */}
         <div className="flex items-center space-x-3">
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2.5">
             <img
               src="/icon-192.png"
               alt="Dagobert Icon"
-              className="w-8 h-8 rounded-xl shadow-sm object-cover"
+              className="w-12 h-12 rounded-2xl shadow-sm object-cover shrink-0"
             />
             <span className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-white hidden xs:inline">
               Dagobert
