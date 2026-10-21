@@ -1,29 +1,243 @@
-:root{--glass-bg:rgba(255,255,255,.72);--glass-border:rgba(255,255,255,.84);--glass-soft:rgba(255,255,255,.56);--glass-ink:#172235;--glass-shadow:0 16px 48px rgba(30,55,90,.1);--glass-hover:rgba(255,255,255,.83)}
-:root.dark{--glass-bg:rgba(28,28,30,.76);--glass-border:rgba(255,255,255,.12);--glass-soft:rgba(48,49,54,.66);--glass-ink:#f5f7fc;--glass-shadow:0 18px 50px rgba(0,0,0,.35);--glass-hover:rgba(60,63,72,.72)}
-.dagobert-app{position:relative;isolation:isolate;color:var(--glass-ink);background:#eaf0f8;font-variant-numeric:tabular-nums}
-.dark .dagobert-app{background:#000}
-.dagobert-app:before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(ellipse 65% 45% at 100% -8%,rgba(10,132,255,.17),transparent 77%),radial-gradient(ellipse 60% 40% at -10% 100%,rgba(191,90,242,.12),transparent 75%)}
-.glass-surface,.dark .glass-surface{min-width:0;background:linear-gradient(145deg,rgba(255,255,255,.045),transparent 65%),var(--glass-bg);border:1px solid var(--glass-border);box-shadow:inset 0 1px rgba(255,255,255,.04),var(--glass-shadow);-webkit-backdrop-filter:blur(24px) saturate(160%);backdrop-filter:blur(24px) saturate(160%)}
-.glass-header,.dark .glass-header{background:var(--glass-bg);border-bottom:1px solid var(--glass-border);-webkit-backdrop-filter:blur(30px) saturate(170%);backdrop-filter:blur(30px) saturate(170%)}
-.glass-pill,.dark .glass-pill{background:var(--glass-soft);border:1px solid var(--glass-border);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
-.glass-pill:hover,.glass-category-pill:hover{background:var(--glass-hover)}
-.glass-action-primary,.dark .glass-action-primary{color:white;background:linear-gradient(145deg,#39a0ff,#0a84ff 65%,#0068ec);border:1px solid rgba(130,201,255,.5);box-shadow:0 7px 22px rgba(10,132,255,.25),inset 0 1px rgba(255,255,255,.27)}
-.glass-kpi{display:flex;flex-direction:column;justify-content:space-between;min-height:136px;padding:clamp(12px,2.3vw,22px);border-radius:24px}
-.glass-kpi-value{font-size:clamp(1rem,3.5vw,1.8rem);font-weight:800;line-height:1.2;letter-spacing:-.045em;overflow-wrap:anywhere}
-.glass-kpi-cashflow,.dark .glass-kpi-cashflow{background:radial-gradient(circle at 90% 0%,rgba(48,209,88,.20),transparent 65%),linear-gradient(145deg,#122a25,#0a1312);border:1px solid rgba(74,222,128,.23);box-shadow:var(--glass-shadow);color:white}
-.glass-icon-chip{width:36px;height:36px;display:grid;place-items:center;border-radius:13px;background:var(--glass-soft);border:1px solid var(--glass-border)}
-.glass-dock,.dark .glass-dock{flex-shrink:0;position:relative;background:var(--glass-bg);border-top:1px solid var(--glass-border);box-shadow:0 -8px 36px rgba(0,0,0,.1);-webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%)}
-.glass-nav-item{min-width:0;border-radius:15px}
-.glass-nav-item:hover{background:var(--glass-hover)}
-.glass-nav-item[data-active="true"]{background:rgba(10,132,255,.13)}
-.glass-main{scrollbar-gutter:stable}
-.glass-category-pill,.dark .glass-category-pill{background:var(--glass-soft);border:1px solid var(--glass-border);border-radius:16px}
-.dagobert-app :where(input:not([type=file]):not([type=checkbox]):not([type=radio]):not([type=color]),select,textarea),.dark .dagobert-app :where(input:not([type=file]):not([type=checkbox]):not([type=radio]):not([type=color]),select,textarea){background:var(--glass-soft);border:1px solid var(--glass-border);color:var(--glass-ink)}
-.dagobert-app :where(button,a,input,select,textarea):focus-visible{outline:2px solid #0a84ff;outline-offset:2px}
-.glass-overlay{-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
-.glass-lock-screen{background:radial-gradient(circle at 50% 10%,#172942,#06080d 55%,#000)}
-@media(min-width:640px){.glass-dock{width:min(92%,650px);align-self:center;border:1px solid var(--glass-border);border-radius:24px;margin:0 0 max(12px,env(safe-area-inset-bottom,0px));box-shadow:var(--glass-shadow)}}
-@media(max-width:639px){.glass-dock{border-radius:22px 22px 0 0}.glass-main{scrollbar-gutter:auto}}
-@media(max-width:374px){.brand-title{display:none}.glass-kpi-value{font-size:.94rem}}
-@media(prefers-reduced-motion:reduce){.dagobert-app *{transition-duration:.01ms!important;animation-duration:.01ms!important}}
-@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.glass-surface,.dark .glass-surface,.glass-header,.dark .glass-header,.glass-dock,.dark .glass-dock{background:#1c1c1e}.dagobert-app:not(.dark) .glass-surface{background:#fff}}
+/* ==========================================================================
+   Dagobert Glassmorphism Theme (True Translucent Frosted Glass)
+   ========================================================================== */
+
+:root {
+  --glass-bg: rgba(255, 255, 255, 0.58);
+  --glass-border: rgba(255, 255, 255, 0.75);
+  --glass-soft: rgba(255, 255, 255, 0.42);
+  --glass-ink: #172235;
+  --glass-shadow: 0 16px 40px rgba(30, 55, 90, 0.08);
+  --glass-hover: rgba(255, 255, 255, 0.82);
+}
+
+:root.dark {
+  --glass-bg: rgba(18, 22, 32, 0.48);
+  --glass-border: rgba(255, 255, 255, 0.14);
+  --glass-soft: rgba(255, 255, 255, 0.07);
+  --glass-ink: #f5f7fc;
+  --glass-shadow: 0 20px 48px -10px rgba(0, 0, 0, 0.55);
+  --glass-hover: rgba(255, 255, 255, 0.12);
+}
+
+.dagobert-app {
+  position: relative;
+  isolation: isolate;
+  color: var(--glass-ink);
+  background: #eef3f9;
+  font-variant-numeric: tabular-nums;
+}
+
+.dark .dagobert-app {
+  background: #080a0f;
+}
+
+/* Ambient glow orbs in background to give true glass depth & refraction */
+.dagobert-app:before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle 550px at 90% 12%, rgba(10, 132, 255, 0.18), transparent 70%),
+    radial-gradient(circle 500px at 8% 45%, rgba(48, 209, 88, 0.12), transparent 70%),
+    radial-gradient(circle 600px at 85% 85%, rgba(191, 90, 242, 0.14), transparent 75%);
+}
+
+.dark .dagobert-app:before {
+  background:
+    radial-gradient(circle 600px at 92% 10%, rgba(10, 132, 255, 0.24), transparent 70%),
+    radial-gradient(circle 520px at 5% 42%, rgba(48, 209, 88, 0.16), transparent 70%),
+    radial-gradient(circle 650px at 80% 88%, rgba(191, 90, 242, 0.18), transparent 75%);
+}
+
+/* Glass Surface (Cards, Panels, Modals) */
+.glass-surface,
+.dark .glass-surface {
+  min-width: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.02) 40%, transparent 100%), var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.16), inset 0 0 18px 0 rgba(255, 255, 255, 0.02), var(--glass-shadow);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  backdrop-filter: blur(28px) saturate(190%);
+}
+
+/* Sticky Glass Header */
+.glass-header,
+.dark .glass-header {
+  background: var(--glass-bg);
+  border-bottom: 1px solid var(--glass-border);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+  -webkit-backdrop-filter: blur(32px) saturate(200%);
+  backdrop-filter: blur(32px) saturate(200%);
+}
+
+/* Glass Pills & Chips */
+.glass-pill,
+.dark .glass-pill {
+  background: var(--glass-soft);
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+}
+
+.glass-pill:hover,
+.glass-category-pill:hover {
+  background: var(--glass-hover);
+}
+
+.glass-action-primary,
+.dark .glass-action-primary {
+  color: white;
+  background: linear-gradient(145deg, #39a0ff, #0a84ff 65%, #0068ec);
+  border: 1px solid rgba(130, 201, 255, 0.5);
+  box-shadow: 0 7px 22px rgba(10, 132, 255, 0.28), inset 0 1px rgba(255, 255, 255, 0.3);
+}
+
+/* KPI Cards */
+.glass-kpi {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 136px;
+  padding: clamp(12px, 2.3vw, 22px);
+  border-radius: 24px;
+}
+
+.glass-kpi-value {
+  font-size: clamp(1rem, 3.5vw, 1.8rem);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.045em;
+  overflow-wrap: anywhere;
+}
+
+.glass-kpi-cashflow,
+.dark .glass-kpi-cashflow {
+  background:
+    radial-gradient(circle at 90% 0%, rgba(48, 209, 88, 0.26), transparent 65%),
+    linear-gradient(145deg, rgba(18, 42, 37, 0.65), rgba(10, 19, 18, 0.75));
+  border: 1px solid rgba(74, 222, 128, 0.28);
+  box-shadow: inset 0 1px 0 0 rgba(74, 222, 128, 0.25), var(--glass-shadow);
+  color: white;
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  backdrop-filter: blur(28px) saturate(190%);
+}
+
+.glass-icon-chip {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: var(--glass-soft);
+  border: 1px solid var(--glass-border);
+}
+
+/* Dock (Floating Bottom Navigation) */
+.glass-dock,
+.dark .glass-dock {
+  flex-shrink: 0;
+  position: relative;
+  background: var(--glass-bg);
+  border-top: 1px solid var(--glass-border);
+  box-shadow: 0 -8px 36px rgba(0, 0, 0, 0.18);
+  -webkit-backdrop-filter: blur(32px) saturate(200%);
+  backdrop-filter: blur(32px) saturate(200%);
+}
+
+.glass-nav-item {
+  min-width: 0;
+  border-radius: 16px;
+}
+
+.glass-nav-item:hover {
+  background: var(--glass-hover);
+}
+
+.glass-nav-item[data-active="true"] {
+  background: rgba(10, 132, 255, 0.15);
+}
+
+.glass-main {
+  scrollbar-gutter: stable;
+}
+
+.glass-category-pill,
+.dark .glass-category-pill {
+  background: var(--glass-soft);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+}
+
+.dagobert-app :where(input:not([type=file]):not([type=checkbox]):not([type=radio]):not([type=color]), select, textarea),
+.dark .dagobert-app :where(input:not([type=file]):not([type=checkbox]):not([type=radio]):not([type=color]), select, textarea) {
+  background: var(--glass-soft);
+  border: 1px solid var(--glass-border);
+  color: var(--glass-ink);
+}
+
+.dagobert-app :where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid #0a84ff;
+  outline-offset: 2px;
+}
+
+.glass-overlay {
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.glass-lock-screen {
+  background: radial-gradient(circle at 50% 10%, #172942, #06080d 55%, #000);
+}
+
+@media (min-width: 640px) {
+  .glass-dock {
+    width: min(92%, 650px);
+    align-self: center;
+    border: 1px solid var(--glass-border);
+    border-radius: 24px;
+    margin: 0 0 max(12px, env(safe-area-inset-bottom, 0px));
+    box-shadow: var(--glass-shadow);
+  }
+}
+
+@media (max-width: 639px) {
+  .glass-dock {
+    border-radius: 22px 22px 0 0;
+  }
+  .glass-main {
+    scrollbar-gutter: auto;
+  }
+}
+
+@media (max-width: 374px) {
+  .brand-title {
+    display: none;
+  }
+  .glass-kpi-value {
+    font-size: 0.94rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dagobert-app * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-surface,
+  .dark .glass-surface,
+  .glass-header,
+  .dark .glass-header,
+  .glass-dock,
+  .dark .glass-dock {
+    background: #1c1c1e;
+  }
+  .dagobert-app:not(.dark) .glass-surface {
+    background: #fff;
+  }
+}

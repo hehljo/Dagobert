@@ -26,7 +26,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <img
               src="/icon-192.png"
               alt="Dagobert Icon"
-              className="w-9 h-9 sm:w-11 sm:h-11 rounded-2xl shadow-sm object-cover shrink-0"
+              className="w-[56px] h-[56px] sm:w-[66px] sm:h-[66px] rounded-2xl shadow-md object-cover shrink-0"
             />
             <span className="brand-title font-extrabold text-lg tracking-tight text-slate-900 dark:text-white hidden xs:inline">
               Dagobert
