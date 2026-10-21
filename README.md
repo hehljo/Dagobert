@@ -12,6 +12,7 @@
   <img src="https://img.shields.io/badge/Tests-80%20passed-success.svg?style=flat-square" alt="Tests">
   <img src="https://img.shields.io/badge/Docker-Ready-2496ED.svg?style=flat-square&logo=docker" alt="Docker">
   <img src="https://img.shields.io/badge/Privacy-100%25%20Local--First-emerald.svg?style=flat-square" alt="Privacy">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-purple.svg?style=flat-square" alt="License"></a>
   <a href="https://buymeacoffee.com/pommesbude" target="_blank"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support%20Development-FFDD00?style=flat-square&logo=buymeacoffee&logoColor=black" alt="Buy Me A Coffee"></a>
 </p>
 
@@ -72,44 +73,99 @@ Bestehende Self-Hosted-Finanztools (wie *Firefly III* oder *Actual Budget*) sind
 
 ---
 
-## 🐳 Schnelle Installation (Docker / Synology DiskStation)
+## 🚀 Schnelle Installation (In 2 Minuten startklar)
 
-Dagobert ist als leichtgewichtiger All-in-One-Container konzipiert:
+Dagobert läuft als schlanker All-in-One-Container. Du musst **weder Git noch Node.js** installiert haben!
 
-### Docker Compose (Empfohlen)
+---
+
+### Methode 1: Portainer (Empfohlen für Homelab / Server)
+Ideal für jedes System mit Portainer (Synology, Unraid, Raspberry Pi, VPS):
+
+1. Öffne **Portainer** ➔ Wähle dein Environment ➔ Klicke auf **Stacks** ➔ **Add Stack**.
+2. Name eingeben (z. B. `dagobert`).
+3. Folgende Konfiguration im Web-Editor einfügen:
+
 ```yaml
-version: "3.8"
+version: 3.8
 
 services:
   dagobert:
-    build: .
+    image: ghcr.io/hehljo/dagobert:latest
     container_name: dagobert
     restart: unless-stopped
     ports:
       - "5052:5052"
     volumes:
-      - ./data:/app/data
-    environment:
-      - NODE_ENV=production
-      - PORT=5052
+      - dagobert_data:/app/data
+
+volumes:
+  dagobert_data:
 ```
 
-Container starten:
+4. Klicke unten auf **Deploy the stack**.
+5. Fertig! Öffne im Browser: `http://<deine-server-ip>:5052`
+
+---
+
+### Methode 2: Synology DiskStation (Container Manager / DSM 7.2)
+Ganz ohne Terminal direkt über die Synology-Weboberfläche:
+
+1. Öffne im Synology DSM den **Container Manager**.
+2. Klicke links auf **Projekt** ➔ **Erstellen**.
+3. Projektname: `dagobert`, Pfad: Wähle deinen Docker-Ordner (z. B. `/docker/dagobert`).
+4. Wähle *docker-compose.yaml erstellen* und füge folgenden Code ein:
+
+```yaml
+version: 3.8
+
+services:
+  dagobert:
+    image: ghcr.io/hehljo/dagobert:latest
+    container_name: dagobert
+    restart: unless-stopped
+    ports:
+      - "5052:5052"
+    volumes:
+      - /volume1/docker/dagobert/data:/app/data
+```
+
+5. Klicke auf **Weiter** ➔ **Fertigstellen**. Der Container wird automatisch heruntergeladen und gestartet.
+6. Im Browser aufrufen: `http://<diskstation-ip>:5052`
+
+---
+
+### Methode 3: Schneller Docker-Befehl (Terminal Einzeiler)
+Wenn du Docker auf Linux, macOS oder Windows installiert hast:
+
 ```bash
+docker run -d \
+  --name dagobert \
+  --restart unless-stopped \
+  -p 5052:5052 \
+  -v dagobert_data:/app/data \
+  ghcr.io/hehljo/dagobert:latest
+```
+
+---
+
+### Methode 4: Für Entwickler (Lokal aus Quellcode bauen)
+Falls du selbst am Code mitentwickeln möchtest:
+
+```bash
+# 1. Repository klonen
+git clone https://github.com/hehljo/Dagobert.git
+cd Dagobert
+
+# 2. Container mit lokalem Multi-Stage Build starten
 docker compose up -d --build
 ```
-
-Nach dem Start erreichbar unter: `http://<deine-server-ip>:5052`
 
 ---
 
 ## 🛠️ Lokale Entwicklung & Tests
 
 ```bash
-# Repository klonen
-git clone https://github.com/hehljo/Dagobert.git
-cd Dagobert
-
 # Abhängigkeiten installieren
 npm install
 
@@ -137,6 +193,13 @@ Dagobert wird unabhängig als Open-Source-Projekt für das eigene Homelab entwic
     <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="46">
   </a>
 </p>
+
+---
+
+## 📄 Lizenz & Urheberschaft
+
+Dieses Projekt ist unter der **[MIT-Lizenz](LICENSE)** lizenziert – frei nutzbar, modifizierbar und selbst hostbar.
+Copyright (c) 2026 Johannes Hehl.
 
 ---
 

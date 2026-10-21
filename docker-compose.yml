@@ -2,13 +2,16 @@ version: '3.8'
 
 services:
   dagobert:
-    image: dagobert:latest
+    image: ghcr.io/hehljo/dagobert:latest
+    # Alternativ lokal aus dem Quellcode bauen:
+    # build: .
     container_name: dagobert
     restart: unless-stopped
     ports:
-      - "5052:5052"
+      - 5052:5052
     volumes:
-      - /volume1/docker/dagobert/data:/app/data
+      - ./data:/app/data
     environment:
+      - NODE_ENV=production
       - PORT=5052
       - DATA_DIR=/app/data
