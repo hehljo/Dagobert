@@ -369,6 +369,10 @@ function UnlockedApp() {
         profileId={activeProfile?.id || 'privat'}
         transaction={selectedTx}
         categories={categories}
+        onCategoryCreated={(newCat) => {
+          setCategories(prev => [...prev.filter(c => c.id !== newCat.id), newCat]);
+          if (activeProfile) loadData(activeProfile.id, 'background');
+        }}
         onClose={() => setSelectedTx(null)}
         onSave={async (tx) => {
           if (!activeProfile) return;

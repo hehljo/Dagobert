@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Trash2, Sparkles, Check } from 'lucide-react';
+import { X, Trash2, Sparkles, Check, Plus } from 'lucide-react';
 import type { Transaction, Category, CategoryRule } from '../types/index.ts';
 import { parseGermanAmount } from '../lib/csvParser.ts';
-import { createCategoryRule } from '../lib/api.ts';
-import { CategoryIcon } from './CategoryIcon.tsx';
+import { createCategoryRule, createCategory } from '../lib/api.ts';
+import { CategoryIcon, AVAILABLE_CATEGORY_ICONS, AVAILABLE_CATEGORY_COLORS } from './CategoryIcon.tsx';
 
 interface TransactionDetailModalProps {
   profileId?: string;
@@ -12,6 +12,7 @@ interface TransactionDetailModalProps {
   onClose: () => void;
   onSave: (transaction: Transaction) => void | Promise<void>;
   onDelete?: (id: number) => void | Promise<void>;
+  onCategoryCreated?: (category: Category) => void;
 }
 
 export const TransactionDetailModal: React.FC<TransactionDetailModalProps> = props => {
@@ -25,6 +26,7 @@ const TransactionEditor: React.FC<TransactionDetailModalProps & { transaction: T
   onClose,
   onSave,
   onDelete,
+  onCategoryCreated,
 }) => {
   const isNew = transaction.id === undefined;
 
@@ -40,6 +42,43 @@ const TransactionEditor: React.FC<TransactionDetailModalProps & { transaction: T
   const [ruleOperator, setRuleOperator] = useState<'contains' | 'equals'>('contains');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // New Category inline creation state
+  const [showNewCategory, setShowNewCategory] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatType, setNewCatType] = useState<'expense' | 'income' | 'transfer'>('expense');
+  const [newCatColor, setNewCatColor] = useState(AVAILABLE_CATEGORY_COLORS[0]);
+  const [newCatIcon, setNewCatIcon] = useState(AVAILABLE_CATEGORY_ICONS[0]);
+  const [isSavingCat, setIsSavingCat] = useState(false);
+
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newCatName.trim();
+    if (!trimmed) {
+      alert('Bitte einen Kategorienamen eingeben.');
+      return;
+    }
+    setIsSavingCat(true);
+    try {
+      const created = await createCategory(profileId, {
+        name: trimmed,
+        type: newCatType,
+        color: newCatColor,
+        icon: newCatIcon
+      });
+      onCategoryCreated?.(created);
+      setSelectedCat(created.id);
+      if (!isNew && created.id !== transaction.category) {
+        setCreateRule(true);
+      }
+      setShowNewCategory(false);
+      setNewCatName('');
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Fehler beim Erstellen der Kategorie');
+    } finally {
+      setIsSavingCat(false);
+    }
+  };
 
   useEffect(() => {
     setDate(transaction.date);
@@ -201,7 +240,117 @@ const TransactionEditor: React.FC<TransactionDetailModalProps & { transaction: T
 
         {/* Category Selection Grid */}
         <div>
-          <label className="text-xs font-semibold text-ios-gray block mb-2">Kategorie wählen</label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-semibold text-ios-gray">Kategorie wählen</label>
+            {!showNewCategory && (
+              <button
+                type="button"
+                onClick={() => setShowNewCategory(true)}
+                className="text-xs text-ios-tint hover:underline font-semibold flex items-center space-x-1"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Neue Kategorie</span>
+              </button>
+            )}
+          </div>
+
+          {showNewCategory && (
+            <form onSubmit={handleCreateCategory} className="mb-3 p-3.5 bg-slate-50 dark:bg-neutral-800/80 rounded-2xl border border-ios-tint/30 space-y-3 animate-fade-in text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-900 dark:text-white">Neue Kategorie erstellen</span>
+                <button
+                  type="button"
+                  onClick={() => setShowNewCategory(false)}
+                  className="text-ios-gray hover:text-slate-900 dark:hover:text-white"
+                >
+                  Abbrechen
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="font-semibold text-ios-gray block mb-1">Name</label>
+                  <input
+                    type="text"
+                    placeholder="z. B. Haustier, Garten..."
+                    value={newCatName}
+                    onChange={(e) => setNewCatName(e.target.value)}
+                    className="w-full px-3 py-2 bg-white dark:bg-neutral-700 rounded-xl outline-none text-xs text-slate-900 dark:text-white border border-ios-separator dark:border-ios-darkSeparator"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold text-ios-gray block mb-1">Typ</label>
+                  <select
+                    value={newCatType}
+                    onChange={(e) => setNewCatType(e.target.value as any)}
+                    className="w-full px-3 py-2 bg-white dark:bg-neutral-700 rounded-xl outline-none text-xs text-slate-900 dark:text-white border border-ios-separator dark:border-ios-darkSeparator"
+                  >
+                    <option value="expense">Ausgabe</option>
+                    <option value="income">Einnahme</option>
+                    <option value="transfer">Umbuchung</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Farben */}
+              <div>
+                <label className="font-semibold text-ios-gray block mb-1">Farbe</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {AVAILABLE_CATEGORY_COLORS.slice(0, 12).map((col) => (
+                    <button
+                      key={col}
+                      type="button"
+                      aria-label={`Farbe ${col}`}
+                      onClick={() => setNewCatColor(col)}
+                      className={`w-6 h-6 rounded-full transition-transform ${newCatColor === col ? 'scale-125 ring-2 ring-ios-tint ring-offset-1' : 'hover:scale-110'}`}
+                      style={{ backgroundColor: col }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Symbole */}
+              <div>
+                <label className="font-semibold text-ios-gray block mb-1">Symbol</label>
+                <div className="grid grid-cols-8 sm:grid-cols-11 gap-1 max-h-24 overflow-y-auto p-1.5 bg-white dark:bg-neutral-700 rounded-xl border border-ios-separator dark:border-ios-darkSeparator">
+                  {AVAILABLE_CATEGORY_ICONS.map((ic) => (
+                    <button
+                      key={ic}
+                      type="button"
+                      aria-label={`Symbol ${ic}`}
+                      onClick={() => setNewCatIcon(ic)}
+                      className={`p-1 rounded-lg flex items-center justify-center transition-colors ${
+                        newCatIcon === ic
+                          ? 'bg-ios-tint text-white shadow-sm'
+                          : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-neutral-600'
+                      }`}
+                    >
+                      <CategoryIcon name={ic} className="w-3.5 h-3.5" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowNewCategory(false)}
+                  className="px-3 py-1.5 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-neutral-700 font-semibold text-xs"
+                >
+                  Abbrechen
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingCat || !newCatName.trim()}
+                  className="px-4 py-1.5 bg-ios-tint text-white rounded-xl font-semibold text-xs disabled:opacity-50 hover:brightness-110 active:scale-95"
+                >
+                  {isSavingCat ? 'Erstelle…' : 'Kategorie anlegen & wählen'}
+                </button>
+              </div>
+            </form>
+          )}
+
           <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
             {categories.map((c) => {
               const isSelected = selectedCat === c.id;
@@ -226,6 +375,15 @@ const TransactionEditor: React.FC<TransactionDetailModalProps & { transaction: T
                 </button>
               );
             })}
+
+            <button
+              type="button"
+              onClick={() => setShowNewCategory(true)}
+              className="flex items-center space-x-2 p-2.5 rounded-xl text-left border-2 border-dashed border-slate-300 dark:border-neutral-700 hover:border-ios-tint text-ios-tint hover:bg-ios-tint/5 transition-all min-h-[44px]"
+            >
+              <Plus className="w-4 h-4 flex-shrink-0" />
+              <span className="text-xs font-semibold truncate flex-1">+ Neue Kategorie</span>
+            </button>
           </div>
         </div>
 
