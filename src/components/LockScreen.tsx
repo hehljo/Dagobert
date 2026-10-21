@@ -151,7 +151,7 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900 text-white selection:bg-ios-tint">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 glass-lock-screen text-white selection:bg-ios-tint">
       <div className="w-full max-w-sm text-center space-y-6">
         {/* App Icon */}
         <div className="w-16 h-16 rounded-3xl bg-neutral-800 border border-neutral-700 flex items-center justify-center mx-auto shadow-2xl shadow-ios-tint/10">
