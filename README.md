@@ -26,6 +26,10 @@
   </a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshot-dashboard.png" alt="Dagobert Glassmorphism Dashboard" width="880" style="border-radius: 16px;">
+</p>
+
 ---
 
 ## 🎯 Warum Dagobert?
