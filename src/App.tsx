@@ -61,8 +61,8 @@ function UnlockedApp() {
   const pendingDataLoadRef = useRef(false);
 
   // Load profiles
-  const loadProfiles = useCallback(async () => {
-    setIsLoading(true);
+  const loadProfiles = useCallback(async (silent = false) => {
+    if (!silent) setIsLoading(true);
     setLoadError(null);
     try {
       const list = await fetchProfiles();
@@ -73,7 +73,8 @@ function UnlockedApp() {
       setActiveProfile(matched);
     } catch {
       setLoadError('Profile konnten nicht geladen werden. Bitte die Verbindung zum Server prüfen.');
-      setIsLoading(false);
+    } finally {
+      if (!silent) setIsLoading(false);
     }
   }, []);
 
@@ -138,7 +139,7 @@ function UnlockedApp() {
       localStorage.setItem('dagobert_active_profile_id', activeProfile.id);
       loadData(activeProfile.id);
     }
-  }, [activeProfile, loadData]);
+  }, [activeProfile?.id, loadData]);
 
   // Dark mode effect
   useEffect(() => {
@@ -314,6 +315,7 @@ function UnlockedApp() {
 
         {!isLoading && hasProfileData && activeTab === 'settings' && (
           <SettingsView
+            profile={activeProfile || undefined}
             profileId={activeProfile?.id || 'privat'}
             account={activeAccount}
             categories={categories}
@@ -322,6 +324,7 @@ function UnlockedApp() {
             onDataChanged={() => {
               if (activeProfile) loadData(activeProfile.id);
             }}
+            onProfilesChanged={loadProfiles}
           />
         )}
       </main>

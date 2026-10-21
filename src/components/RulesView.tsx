@@ -221,7 +221,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
             onClick={handleLoadDefaults}
             aria-label={isLoadingDefaults ? 'Standard-Regeln werden geladen…' : 'Standard-Regeln laden / aktualisieren'}
             disabled={isLoadingDefaults || isApplying}
-            className="flex items-center gap-1.5 min-h-[44px] px-3.5 py-2 rounded-2xl text-xs font-semibold bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 min-h-[48px] px-3.5 py-2 rounded-2xl text-xs font-semibold bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 transition-colors disabled:opacity-50"
           >
             <Download className="w-4 h-4 shrink-0" />
             <span>{isLoadingDefaults ? 'Lädt…' : 'Standard-Regeln'}</span>
@@ -230,7 +230,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
             onClick={handleApplyRulesToExisting}
             aria-label={isApplying ? 'Wird angewendet…' : 'Regeln anwenden'}
             disabled={isApplying || isLoadingDefaults}
-            className="flex items-center space-x-1.5 min-h-[44px] px-3.5 py-2 rounded-2xl text-xs font-semibold bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 transition-colors disabled:opacity-50"
+            className="flex items-center space-x-1.5 min-h-[48px] px-3.5 py-2 rounded-2xl text-xs font-semibold bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 transition-colors disabled:opacity-50"
           >
             <Play className="w-3.5 h-3.5 text-ios-tint" />
             <span>{isApplying ? 'Wird angewendet…' : 'Regeln anwenden'}</span>
@@ -240,7 +240,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
             onClick={handleStartNewRule}
             disabled={isApplying || isLoadingDefaults}
             aria-label="Neue Regel anlegen"
-            className="flex items-center space-x-1.5 min-h-[44px] px-4 py-2 rounded-2xl text-xs font-semibold bg-ios-tint text-white shadow-sm hover:brightness-110 active:scale-95 transition-all disabled:opacity-50"
+            className="flex items-center space-x-1.5 min-h-[48px] px-4 py-2 rounded-2xl text-xs font-semibold bg-ios-tint text-white shadow-sm hover:brightness-110 active:scale-95 transition-all disabled:opacity-50"
           >
             <Plus className="w-4 h-4" />
             <span>Neue Regel</span>

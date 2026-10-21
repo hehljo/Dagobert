@@ -1,28 +1,34 @@
-import type { Account, Category } from '../types/index.ts';
+import type { Account, Category, Profile } from '../types/index.ts';
 import React, { useState } from 'react';
 import { Download, Upload, Trash2, Shield, Moon, Sun, Database, Sparkles, Fingerprint, KeyRound, Lock, Check, Landmark, Tag, Plus, X } from 'lucide-react';
 // db helpers
 import { parseGermanAmount } from '../lib/csvParser.ts';
-import { updateAccountSettings, exportProfileBackup, importProfileBackup, resetProfileData, batchImportTransactions, createCategory, deleteCategory } from '../lib/api.ts';
+import { updateAccountSettings, exportProfileBackup, importProfileBackup, resetProfileData, batchImportTransactions, createCategory, deleteCategory, updateProfilePin } from '../lib/api.ts';
 import { APP_VERSION, BUILD_DATE } from '../version.ts';
 import { getSecurityConfig, saveSecurityConfig, registerPasskey, isPasskeySupported, hashPin, type SecurityConfig } from '../lib/passkey.ts';
 import { CategoryIcon, AVAILABLE_CATEGORY_ICONS, AVAILABLE_CATEGORY_COLORS } from './CategoryIcon.tsx';
 
 interface SettingsViewProps {
+  profile?: Profile;
   profileId?: string;
   account?: Account;
   categories?: Category[];
   isDark: boolean;
   onToggleDark: () => void;
   onDataChanged: () => void;
+  onProfilesChanged?: (silent?: boolean) => void;
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark, onDataChanged, account, categories = [], profileId = 'privat' }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark, onDataChanged, onProfilesChanged, account, categories = [], profile, profileId = 'privat' }) => {
   const [isExporting, setIsExporting] = useState(false);
   const [security, setSecurity] = useState<SecurityConfig>(getSecurityConfig());
   const [pinInput, setPinInput] = useState('');
   const [showPinSetup, setShowPinSetup] = useState(false);
   const [secNotice, setSecNotice] = useState<string | null>(null);
+  const [showProfilePinSetup, setShowProfilePinSetup] = useState(false);
+  const [profilePinInput, setProfilePinInput] = useState('');
+  const [profilePinNotice, setProfilePinNotice] = useState<string | null>(null);
+  const [isSavingProfilePin, setIsSavingProfilePin] = useState(false);
   const [initBalInput, setInitBalInput] = useState(account ? account.initialBalance.toFixed(2).replace('.', ',') : '0,00');
   const [initDateInput, setInitDateInput] = useState(account?.initialBalanceDate || '2026-01-01');
   const [checkpointBalInput, setCheckpointBalInput] = useState(
@@ -90,6 +96,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
     await updateAccountSettings(profileId, 'comdirect', val, initDateInput, cpVal, cpDate);
     alert('Kontoeinstellungen erfolgreich gespeichert!');
     onDataChanged();
+  };
+
+  const handleSaveProfilePin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = profilePinInput.trim();
+    if (!/^\d{4,6}$/.test(clean)) {
+      alert('Die Profil-PIN muss 4 bis 6 Ziffern enthalten.');
+      return;
+    }
+    setIsSavingProfilePin(true);
+    try {
+      await updateProfilePin(profileId, clean);
+      setProfilePinNotice('Profil-PIN erfolgreich auf dem Server gespeichert! Jedes neue Gerät muss diese PIN eingeben.');
+      setShowProfilePinSetup(false);
+      setProfilePinInput('');
+      onProfilesChanged?.(true);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Fehler beim Speichern der Server-PIN');
+    } finally {
+      setIsSavingProfilePin(false);
+    }
+  };
+
+  const handleRemoveProfilePin = async () => {
+    if (confirm('Profil-PIN auf dem Server wirklich entfernen? Jedes Gerät im Netzwerk hat dann wieder direkten Zugriff auf alle Buchungen.')) {
+      setIsSavingProfilePin(true);
+      try {
+        await updateProfilePin(profileId, null);
+        setProfilePinNotice('Profil-PIN auf dem Server entfernt.');
+        setShowProfilePinSetup(false);
+        setProfilePinInput('');
+        onProfilesChanged?.(true);
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Fehler beim Entfernen der Server-PIN');
+      } finally {
+        setIsSavingProfilePin(false);
+      }
+    }
   };
 
   const handleToggleSecurity = async () => {
@@ -343,6 +387,97 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
             Deine Finanzdaten und Kontoumsätze verlassen niemals dieses Gerät. Die gesamte Verarbeitung, der CSV-Import und die Speicherung laufen ausschließlich lokal in deiner Browser-Datenbank (IndexedDB).
           </p>
         </div>
+      </div>
+
+      {/* Profil-PIN (Globaler Server-Schutz) */}
+      <div className="bg-white dark:bg-ios-darkCard rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${profile?.hasPin ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'}`}>
+              <Shield className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                <span>{profile?.hasPin ? 'Profil-PIN aktiv (Server-Schutz)' : 'Kein Server-Schutz aktiv'}</span>
+                {profile?.hasPin ? (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">Gesperrt</span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400">Offen</span>
+                )}
+              </p>
+              <p className="text-xs text-ios-gray">
+                {profile?.hasPin
+                  ? 'Alle neuen Geräte und Browser müssen diese PIN eingeben'
+                  : 'Achtung: Jedes Gerät im Netzwerk kann deine Umsätze ohne Abfrage laden!'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowProfilePinSetup(!showProfilePinSetup)}
+            className="px-3.5 py-2 bg-ios-tint/10 hover:bg-ios-tint/20 text-ios-tint rounded-xl text-xs font-semibold transition-colors min-h-[44px]"
+          >
+            {profile?.hasPin ? 'PIN ändern / löschen' : 'Server-PIN einrichten'}
+          </button>
+        </div>
+
+        {profilePinNotice && (
+          <div className="p-3 bg-ios-green/10 border border-ios-green/20 rounded-2xl flex items-center space-x-2 text-ios-green text-xs font-medium">
+            <Check className="w-4 h-4 flex-shrink-0" />
+            <span>{profilePinNotice}</span>
+          </div>
+        )}
+
+        {showProfilePinSetup && (
+          <form onSubmit={handleSaveProfilePin} className="p-4 bg-slate-50 dark:bg-neutral-800/60 rounded-2xl space-y-3 animate-fade-in text-xs border border-ios-separator dark:border-ios-darkSeparator">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-800 dark:text-slate-200">
+                {profile?.hasPin ? 'Profil-PIN auf dem Server ändern' : 'Neue Server-PIN vergeben (4-6 Ziffern)'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowProfilePinSetup(false)}
+                className="text-ios-gray hover:text-slate-900"
+              >
+                Abbrechen
+              </button>
+            </div>
+            <p className="text-[11px] text-ios-gray">
+              Diese PIN wird zentral auf dem Server (SQLite) verschlüsselt gespeichert. Jedes neue Gerät, jeder Browser und jede abgelaufene Sitzung muss sie eingeben, bevor überhaupt Kontodaten geladen werden.
+            </p>
+            <div className="flex space-x-2">
+              <input
+                type="password"
+                maxLength={6}
+                placeholder="4-6 Ziffern"
+                aria-label="Neue Server-PIN"
+                inputMode="numeric"
+                value={profilePinInput}
+                onChange={(e) => setProfilePinInput(e.target.value)}
+                className="flex-1 px-3 py-2 bg-white dark:bg-neutral-700 rounded-xl outline-none font-mono text-center tracking-widest text-sm"
+              />
+              <button
+                type="submit"
+                disabled={profilePinInput.length < 4 || isSavingProfilePin}
+                className="px-4 py-2 bg-ios-tint text-white rounded-xl font-semibold disabled:opacity-50"
+              >
+                {isSavingProfilePin ? 'Speichert…' : 'Auf Server speichern'}
+              </button>
+            </div>
+            {profile?.hasPin && (
+              <div className="pt-2 border-t border-ios-separator dark:border-ios-darkSeparator flex justify-end">
+                <button
+                  type="button"
+                  disabled={isSavingProfilePin}
+                  onClick={handleRemoveProfilePin}
+                  className="text-ios-red text-xs font-medium hover:underline"
+                >
+                  Server-PIN komplett entfernen
+                </button>
+              </div>
+            )}
+          </form>
+        )}
       </div>
 
       {/* Security & App Lock (Passkey / PIN) */}
@@ -674,7 +809,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
           </div>
 
           <button
-            onClick={onToggleDark}
+            onClick={onToggleDark} aria-label={isDark ? "Dark Mode deaktivieren" : "Dark Mode aktivieren"}
             className={`w-12 h-7 rounded-full p-1 transition-colors ${isDark ? 'bg-ios-green' : 'bg-slate-300'}`}
           >
             <div className={`w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${isDark ? 'translate-x-5' : 'translate-x-0'}`} />

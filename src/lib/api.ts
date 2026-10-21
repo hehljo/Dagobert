@@ -23,6 +23,33 @@ export async function createProfile(name: string, icon: string = 'User', color: 
   return res.json();
 }
 
+export async function updateProfile(
+  profileId: string,
+  updates: { name?: string; icon?: string; color?: string; pin?: string; removePin?: boolean }
+): Promise<{ success: boolean; hasPin: boolean }> {
+  const res = await fetch(`${BASE_URL}/api/profiles/${encodeURIComponent(profileId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Fehler beim Aktualisieren des Profils");
+  }
+  return res.json();
+}
+
+export async function updateProfilePin(
+  profileId: string,
+  pin: string | null
+): Promise<{ success: boolean; hasPin: boolean }> {
+  const result = await updateProfile(profileId, pin ? { pin } : { removePin: true });
+  if (pin) {
+    await unlockProfile(profileId, pin);
+  }
+  return result;
+}
+
 export async function unlockProfile(profileId: string, pin: string): Promise<boolean> {
   const res = await fetch(`${BASE_URL}/api/profiles/${profileId}/unlock`, {
     method: 'POST',
