@@ -168,8 +168,8 @@ const TransactionEditor: React.FC<TransactionDetailModalProps & { transaction: T
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="bg-white dark:bg-ios-darkCard w-full max-w-lg rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl max-h-[90dvh] overflow-y-auto space-y-4 border border-ios-separator dark:border-ios-darkSeparator">
+    <div className="glass-overlay fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+      <div className="glass-surface w-full max-w-lg rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl max-h-[90dvh] overflow-y-auto space-y-4 border border-ios-separator dark:border-ios-darkSeparator">
         {/* Header */}
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-ios-gray uppercase tracking-wider">
