@@ -229,7 +229,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
   return (
     <div className="space-y-5 pb-24 max-w-5xl mx-auto px-4 pt-4">
       {/* Header card */}
-      <div className="bg-white dark:bg-ios-darkCard p-5 rounded-3xl shadow-sm border border-ios-separator dark:border-ios-darkSeparator flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="glass-surface p-5 rounded-3xl shadow-sm border border-ios-separator dark:border-ios-darkSeparator flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="font-bold text-lg text-slate-900 dark:text-white flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-amber-500" />
@@ -281,7 +281,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
 
       {/* Create / Edit Rule Modal / Form */}
       {editingRule && (
-        <form onSubmit={handleSaveRule} className="bg-white dark:bg-ios-darkCard p-5 rounded-3xl shadow-lg border-2 border-ios-tint/40 space-y-4 animate-fade-in text-xs">
+        <form onSubmit={handleSaveRule} className="glass-surface p-5 rounded-3xl shadow-lg border-2 border-ios-tint/40 space-y-4 animate-fade-in text-xs">
           <div className="flex items-center justify-between pb-2 border-b border-ios-separator dark:border-ios-darkSeparator">
             <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
               {editingRule.isNew ? <Plus className="w-4 h-4 text-ios-tint" /> : <Pencil className="w-4 h-4 text-ios-tint" />}
@@ -470,7 +470,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
               key={rule.id}
               className={`p-4 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
                 rule.enabled
-                  ? 'bg-white dark:bg-ios-darkCard border-ios-separator dark:border-ios-darkSeparator shadow-sm'
+                  ? 'glass-surface border-ios-separator dark:border-ios-darkSeparator shadow-sm'
                   : 'bg-slate-50 dark:bg-neutral-900 border-transparent opacity-60'
               }`}
             >
