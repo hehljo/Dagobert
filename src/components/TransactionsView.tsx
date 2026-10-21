@@ -94,7 +94,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   return (
     <div className="space-y-4 pb-24 max-w-5xl mx-auto px-4 pt-4">
       {/* Search and Filters Header */}
-      <div className="space-y-3 bg-white dark:bg-ios-darkCard p-4 rounded-3xl shadow-sm border border-ios-separator dark:border-ios-darkSeparator">
+      <div className="space-y-3 glass-surface p-4 rounded-3xl shadow-sm border border-ios-separator dark:border-ios-darkSeparator">
         {/* Search Input */}
         <div className="relative">
           <Search className="w-5 h-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-ios-gray" />
@@ -191,7 +191,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       {/* Transaction List */}
       <div className="space-y-4">
         {groupedByDate.length === 0 ? (
-          <div className="bg-white dark:bg-ios-darkCard rounded-3xl p-8 text-center text-ios-gray">
+          <div className="glass-surface rounded-3xl p-8 text-center text-ios-gray">
             <Calendar className="w-8 h-8 mx-auto mb-2 opacity-40" />
             <p className="font-medium text-sm">Keine passenden Buchungen gefunden</p>
           </div>
@@ -207,7 +207,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
               </div>
 
               {/* Transactions in Date */}
-              <div className="bg-white dark:bg-ios-darkCard rounded-2xl overflow-hidden shadow-sm border border-ios-separator dark:border-ios-darkSeparator divide-y divide-ios-separator/50 dark:divide-ios-darkSeparator/50">
+              <div className="glass-surface rounded-2xl overflow-hidden shadow-sm border border-ios-separator dark:border-ios-darkSeparator divide-y divide-ios-separator/50 dark:divide-ios-darkSeparator/50">
                 {group.items.map((t) => {
                   const cat = catMap.get(t.category);
                   const isPositive = t.amount > 0;

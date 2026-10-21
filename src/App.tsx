@@ -222,7 +222,7 @@ function UnlockedApp() {
   const hasProfileData = !!activeProfile && loadedProfileIdRef.current === activeProfile.id;
 
   return (
-    <div className="h-full h-[var(--app-height,100%)] flex flex-col bg-slate-50 dark:bg-black text-slate-900 dark:text-white transition-colors duration-200 overflow-hidden select-none">
+    <div className="dagobert-app h-full h-[var(--app-height,100%)] flex flex-col overflow-hidden select-none">
       {/* Top Header Navbar */}
       <Navbar
         activeProfile={activeProfile || undefined}
@@ -233,7 +233,7 @@ function UnlockedApp() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto overscroll-contain pb-24 touch-pan-y">
+      <main className="glass-main flex-1 min-h-0 overflow-y-auto overscroll-contain pb-6 touch-pan-y">
         {isLoading && (
           <div className="text-center py-12 text-xs text-ios-gray">
             Daten werden geladen...

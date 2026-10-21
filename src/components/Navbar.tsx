@@ -18,17 +18,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   actionsDisabled = false,
 }) => {
   return (
-    <header className="sticky top-0 z-40 bg-white/80 dark:bg-ios-darkCard/80 backdrop-blur-md border-b border-ios-separator dark:border-ios-darkSeparator pt-[env(safe-area-inset-top,0px)] transition-colors">
-      <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
+    <header className="glass-header sticky top-0 z-40 pt-[env(safe-area-inset-top,0px)] transition-colors">
+      <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 h-[66px] sm:h-[76px] flex items-center justify-between">
         {/* Left: Brand + Profile Switcher */}
         <div className="flex items-center space-x-3">
           <div className="flex items-center space-x-2.5">
             <img
               src="/icon-192.png"
               alt="Dagobert Icon"
-              className="w-12 h-12 rounded-2xl shadow-sm object-cover shrink-0"
+              className="w-9 h-9 sm:w-11 sm:h-11 rounded-2xl shadow-sm object-cover shrink-0"
             />
-            <span className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-white hidden xs:inline">
+            <span className="brand-title font-extrabold text-lg tracking-tight text-slate-900 dark:text-white hidden xs:inline">
               Dagobert
             </span>
           </div>
@@ -37,7 +37,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {activeProfile && (
             <button
               onClick={onOpenProfiles}
-              className="flex items-center space-x-1.5 px-3 py-1 rounded-full bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200/80 dark:hover:bg-neutral-700/80 transition-all text-xs font-semibold text-slate-800 dark:text-slate-200 border border-slate-200/60 dark:border-neutral-700/60 min-h-[36px]"
+              className="flex items-center space-x-1.5 px-3 py-1 glass-pill rounded-full transition-all text-xs font-semibold text-slate-800 dark:text-slate-200 border border-slate-200/60 dark:border-neutral-700/60 min-h-[36px]"
               title="Profil wechseln"
             >
               <span
@@ -56,7 +56,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             onClick={onOpenNewManual}
             disabled={actionsDisabled}
-            className="flex items-center justify-center space-x-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-100 dark:bg-neutral-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-neutral-700 transition-colors min-h-[40px]"
+            className="flex items-center justify-center space-x-1 px-3 py-1.5 glass-pill rounded-full text-xs font-semibold transition-colors min-h-[40px]"
             title="Manuelle Buchung erfassen"
           >
             <Plus className="w-4 h-4" />
@@ -67,11 +67,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             onClick={onOpenImport}
             disabled={actionsDisabled}
-            className="flex items-center justify-center space-x-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-ios-tint text-white shadow-sm hover:brightness-110 active:scale-95 transition-all min-h-[40px]"
+            className="flex items-center justify-center space-x-1.5 px-3.5 py-1.5 glass-action-primary rounded-full text-xs font-semibold hover:brightness-110 active:scale-95 transition-all min-h-[40px]"
             title="comdirect CSV importieren"
           >
             <Upload className="w-4 h-4" />
-            <span>Import</span>
+            <span className="sm:hidden">CSV</span><span className="hidden sm:inline">CSV Import</span>
           </button>
         </div>
       </div>

@@ -65,9 +65,9 @@ export const DonutChart: React.FC<DonutChartProps> = ({
   const activeSlice = slices.find(s => s.id === hoveredId);
 
   return (
-    <div className="flex flex-col md:flex-row items-center justify-around gap-6 py-2">
+    <div className="flex flex-col lg:flex-row items-center justify-around gap-6 lg:gap-10 py-3">
       {/* SVG Donut */}
-      <div className="relative w-48 h-48 flex-shrink-0">
+      <div className="relative w-52 h-52 sm:w-56 sm:h-56 flex-shrink-0">
         <svg role="group" aria-label={`${label} nach Kategorien`} className="w-full h-full -rotate-90 transform" viewBox={`0 0 ${size} ${size}`}>
           {/* Background circle */}
           <circle
@@ -148,7 +148,7 @@ export const DonutChart: React.FC<DonutChartProps> = ({
               onClick={() => onSelectCategory?.(slice.id)}
               onMouseEnter={() => setHoveredId(slice.id)}
               onMouseLeave={() => setHoveredId(null)}
-              className={`w-full min-h-[48px] text-left flex items-center justify-between p-2 rounded-xl cursor-pointer transition-colors ${
+              className={`glass-category-pill w-full min-h-[48px] text-left flex items-center justify-between p-2 rounded-xl cursor-pointer transition-colors ${
                 hoveredId === slice.id ? 'bg-slate-100 dark:bg-neutral-800' : 'hover:bg-slate-50 dark:hover:bg-neutral-800/50'
               }`}
             >

@@ -102,9 +102,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [selectedMonth]);
 
   return (
-    <div className="space-y-6 pb-6 max-w-5xl mx-auto px-4 pt-4">
+    <div className="space-y-4 sm:space-y-6 pb-8 max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 pt-4 sm:pt-7">
       {/* Month Switcher Bar */}
-      <div className="flex items-center justify-between bg-white dark:bg-ios-darkCard rounded-2xl p-2 shadow-sm border border-ios-separator dark:border-ios-darkSeparator">
+      <div className="flex items-center justify-between glass-surface rounded-2xl p-2 shadow-sm border border-ios-separator dark:border-ios-darkSeparator">
         <button
           onClick={handlePrevMonth}
           className="min-w-[48px] min-h-[48px] rounded-xl flex items-center justify-center text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-neutral-800 transition-colors"
@@ -127,14 +127,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       {/* Main KPI Cards Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
         {/* Real Account Balance Card */}
-        <div className="col-span-2 sm:col-span-1 bg-white dark:bg-ios-darkCard rounded-3xl p-4 shadow-sm border border-ios-separator dark:border-ios-darkSeparator">
+        <div className="glass-surface glass-kpi">
           <div className="flex items-center justify-between text-ios-gray mb-1">
             <span className="text-xs font-semibold">Kontostand</span>
             <Landmark className="w-4 h-4 text-ios-tint" />
           </div>
-          <div className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+          <div className="glass-kpi-value text-slate-900 dark:text-white tracking-tight">
             {realBalance.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
           </div>
           <p className="text-[10px] text-ios-gray mt-1 truncate">
@@ -143,13 +143,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         {/* Net Cashflow / Monatssaldo */}
-        <div className="col-span-2 sm:col-span-1 bg-gradient-to-br from-slate-900 to-neutral-800 text-white rounded-3xl p-4 shadow-sm relative overflow-hidden">
+        <div className="glass-kpi glass-kpi-cashflow relative overflow-hidden">
           <div className="flex justify-between items-start text-xs font-semibold text-slate-400">
             <span>Cashflow (Monat)</span>
             <Wallet className="w-4 h-4 text-amber-300" />
           </div>
           <div className="mt-1">
-            <div className={`text-xl sm:text-2xl font-extrabold tracking-tight ${balance >= 0 ? 'text-ios-green' : 'text-ios-red'}`}>
+            <div className={`glass-kpi-value tracking-tight ${balance >= 0 ? 'text-ios-green' : 'text-ios-red'}`}>
               {balance >= 0 ? '+' : ''}{balance.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
             </div>
             <p className="text-[10px] text-slate-300 mt-1">
@@ -159,30 +159,30 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         {/* Income Card */}
-        <div className="bg-white dark:bg-ios-darkCard rounded-3xl p-4 shadow-sm border border-ios-separator dark:border-ios-darkSeparator">
+        <div className="glass-surface glass-kpi">
           <div className="flex items-center justify-between text-ios-gray mb-1">
             <span className="text-xs font-medium">Einnahmen</span>
             <TrendingUp className="w-4 h-4 text-ios-green" />
           </div>
-          <div className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white">
+          <div className="glass-kpi-value text-slate-900 dark:text-white">
             +{income.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
           </div>
         </div>
 
         {/* Expense Card */}
-        <div className="bg-white dark:bg-ios-darkCard rounded-3xl p-4 shadow-sm border border-ios-separator dark:border-ios-darkSeparator">
+        <div className="glass-surface glass-kpi">
           <div className="flex items-center justify-between text-ios-gray mb-1">
             <span className="text-xs font-medium">Ausgaben</span>
             <TrendingDown className="w-4 h-4 text-ios-red" />
           </div>
-          <div className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white">
+          <div className="glass-kpi-value text-slate-900 dark:text-white">
             -{expense.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
           </div>
         </div>
       </div>
 
       {/* Category Breakdown Card */}
-      <div className="bg-white dark:bg-ios-darkCard rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator">
+      <div className="glass-surface rounded-3xl p-4 sm:p-6 lg:p-7">
         <div className="flex items-center justify-between mb-2">
           <h2 className="font-bold text-base text-slate-900 dark:text-white flex items-center gap-2">
             <span>Ausgaben nach Kategorien</span>
