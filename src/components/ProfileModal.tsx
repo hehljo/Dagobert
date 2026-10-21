@@ -102,8 +102,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const colors = ['#0A84FF', '#30D158', '#FF9F0A', '#FF375F', '#BF5AF2', '#64D2FF'];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="bg-white dark:bg-ios-darkCard w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl max-h-[90dvh] overflow-y-auto space-y-5 border border-ios-separator dark:border-ios-darkSeparator">
+    <div className="glass-overlay fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+      <div className="glass-surface w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl max-h-[90dvh] overflow-y-auto space-y-5 border border-ios-separator dark:border-ios-darkSeparator">
         {/* Header */}
         <div className="flex items-center justify-between">
           <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
