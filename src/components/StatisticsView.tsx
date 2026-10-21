@@ -15,7 +15,7 @@ const currency = new Intl.NumberFormat('de-DE', { style: 'currency', currency: '
 const percentage = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1 });
 const months = Array.from({ length: 12 }, (_, index) =>
   new Intl.DateTimeFormat('de-DE', { month: 'long' }).format(new Date(2020, index, 1)));
-const card = 'rounded-3xl border border-ios-separator dark:border-ios-darkSeparator bg-white dark:bg-ios-darkCard p-4 sm:p-5 shadow-sm';
+const card = 'rounded-3xl border border-ios-separator dark:border-ios-darkSeparator glass-surface p-4 sm:p-5 shadow-sm';
 const secondary = 'text-slate-600 dark:text-slate-400';
 const control = 'min-h-[48px] rounded-xl px-4 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ios-tint';
 
