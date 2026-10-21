@@ -30,7 +30,8 @@ export function App() {
 function UnlockedApp() {
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [isDark, setIsDark] = useState<boolean>(() => {
-    return localStorage.getItem('dagobert_theme') !== 'light';
+    return localStorage.getItem('dagobert_theme') === 'dark' ||
+      (!localStorage.getItem('dagobert_theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
   });
 
   const [isImportOpen, setIsImportOpen] = useState(false);
