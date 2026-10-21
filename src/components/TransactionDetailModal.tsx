@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { X, Trash2, Sparkles, Check, Plus } from 'lucide-react';
 import type { Transaction, Category, CategoryRule } from '../types/index.ts';
 import { parseGermanAmount } from '../lib/csvParser.ts';
-import { createCategoryRule, createCategory } from '../lib/api.ts';
+import { createCategoryRule, createCategory, updateExistingTransaction } from '../lib/api.ts';
+import { matchesCondition } from '../lib/rulesEngine.ts';
 import { CategoryIcon, AVAILABLE_CATEGORY_ICONS, AVAILABLE_CATEGORY_COLORS } from './CategoryIcon.tsx';
 
 interface TransactionDetailModalProps {
   profileId?: string;
   transaction: Transaction | null;
   categories: Category[];
+  existingTransactions?: Transaction[];
   onClose: () => void;
   onSave: (transaction: Transaction) => void | Promise<void>;
   onDelete?: (id: number) => void | Promise<void>;
@@ -23,6 +25,7 @@ const TransactionEditor: React.FC<TransactionDetailModalProps & { transaction: T
   profileId = 'privat',
   transaction,
   categories,
+  existingTransactions = [],
   onClose,
   onSave,
   onDelete,
@@ -40,6 +43,7 @@ const TransactionEditor: React.FC<TransactionDetailModalProps & { transaction: T
   const [ruleField, setRuleField] = useState<'payee' | 'purpose' | 'rawText'>('payee');
   const [ruleValue, setRuleValue] = useState(transaction.payee || '');
   const [ruleOperator, setRuleOperator] = useState<'contains' | 'equals'>('contains');
+  const [applyToPast, setApplyToPast] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,6 +96,7 @@ const TransactionEditor: React.FC<TransactionDetailModalProps & { transaction: T
     setRuleField(initialField);
     setRuleValue((initialField === 'payee' ? transaction.payee : transaction.rawText.slice(0, 30)) || '');
     setRuleOperator('contains');
+    setApplyToPast(true);
   }, [transaction]);
 
   const handleSave = async () => {
@@ -137,6 +142,21 @@ const TransactionEditor: React.FC<TransactionDetailModalProps & { transaction: T
           enabled: true
         };
         await createCategoryRule(profileId, newRule);
+
+        if (applyToPast && existingTransactions && existingTransactions.length > 0) {
+          const condition = newRule.conditions[0];
+          for (const pastTx of existingTransactions) {
+            if (pastTx.id !== undefined && pastTx.id !== transaction.id && pastTx.category !== selectedCat) {
+              if (matchesCondition(pastTx, condition)) {
+                try {
+                  await updateExistingTransaction(pastTx.id, { category: selectedCat });
+                } catch (e) {
+                  console.warn('Fehler beim rückwirkenden Kategorisieren:', pastTx.id, e);
+                }
+              }
+            }
+          }
+        }
       }
       await onSave(updated);
       onClose();
@@ -465,6 +485,22 @@ const TransactionEditor: React.FC<TransactionDetailModalProps & { transaction: T
                   <span className="text-[10px] text-ios-gray mt-0.5 block">
                     Tipp: Du kannst den Text kürzen (z. B. nur „REWE“ statt des ganzen Filialnamens), damit alle künftigen Buchungen greifen.
                   </span>
+                </div>
+
+                <div className="pt-2 border-t border-amber-500/20 flex items-start space-x-2.5">
+                  <input
+                    type="checkbox"
+                    id="applyToPastCheckbox"
+                    checked={applyToPast}
+                    onChange={(e) => setApplyToPast(e.target.checked)}
+                    className="rounded text-amber-500 focus:ring-amber-500 mt-0.5 w-4 h-4 cursor-pointer"
+                  />
+                  <label htmlFor="applyToPastCheckbox" className="text-xs text-slate-800 dark:text-slate-200 cursor-pointer select-none">
+                    <span className="font-semibold">Regel auch auf vergangene Buchungen anwenden</span>
+                    <span className="block text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
+                      Kategorisiert alle bereits vorhandenen passenden Buchungen rückwirkend um.
+                    </span>
+                  </label>
                 </div>
               </div>
             )}

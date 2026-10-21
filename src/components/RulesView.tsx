@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Plus, Sparkles, Trash2, Play, Check, Download, Pencil, X } from 'lucide-react';
 import type { CategoryRule, Category, Transaction, RuleCondition } from '../types/index.ts';
-import { evaluateRules } from '../lib/rulesEngine.ts';
+import { evaluateRules, matchesCondition } from '../lib/rulesEngine.ts';
 import { createCategoryRule, deleteCategoryRuleScoped, loadStandardCategoryRules, updateExistingTransaction } from '../lib/api.ts';
 import { CategoryIcon } from './CategoryIcon.tsx';
 
@@ -42,6 +42,7 @@ const OPERATOR_LABELS: Record<RuleCondition['operator'], string> = {
 
 export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rules, categories, transactions, onRulesUpdated }) => {
   const [editingRule, setEditingRule] = useState<EditingRule | null>(null);
+  const [applyToExistingOnSave, setApplyToExistingOnSave] = useState(true);
   const [isApplying, setIsApplying] = useState(false);
   const [isLoadingDefaults, setIsLoadingDefaults] = useState(false);
   const [feedback, setFeedback] = useState<{ text: string; error: boolean } | null>(null);
@@ -50,6 +51,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
   const catMap = new Map(categories.map(c => [c.id, c]));
 
   const handleStartNewRule = () => {
+    setApplyToExistingOnSave(true);
     setEditingRule({
       id: 'rule_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       name: '',
@@ -62,6 +64,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
   };
 
   const handleStartEditRule = (rule: CategoryRule) => {
+    setApplyToExistingOnSave(true);
     setEditingRule({
       id: rule.id,
       name: rule.name,
@@ -134,7 +137,29 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
 
     try {
       await createCategoryRule(profileId, ruleToSave);
+      let retroCount = 0;
+      if (applyToExistingOnSave && transactions.length > 0) {
+        for (const tx of transactions) {
+          if (tx.id !== undefined && tx.category !== ruleToSave.applyCategory) {
+            const allMatch = ruleToSave.conditions.every(cond => matchesCondition(tx, cond));
+            if (allMatch) {
+              try {
+                await updateExistingTransaction(tx.id, { category: ruleToSave.applyCategory });
+                retroCount++;
+              } catch (e) {
+                console.warn('Fehler beim Aktualisieren der Buchung:', tx.id, e);
+              }
+            }
+          }
+        }
+      }
       setEditingRule(null);
+      if (retroCount > 0) {
+        setFeedback({
+          text: `Regel gespeichert und ${retroCount.toLocaleString('de-DE')} bestehende Buchungen aktualisiert.`,
+          error: false
+        });
+      }
       await onRulesUpdated();
     } catch (err: any) {
       alert(err.message || 'Fehler beim Speichern der Regel.');
@@ -398,6 +423,23 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
                 );
               })}
             </div>
+          </div>
+
+          {/* Option: Auf vergangene Buchungen anwenden */}
+          <div className="flex items-start space-x-2.5 pt-2 border-t border-ios-separator dark:border-ios-darkSeparator">
+            <input
+              type="checkbox"
+              id="applyRuleToPastInRulesView"
+              checked={applyToExistingOnSave}
+              onChange={(e) => setApplyToExistingOnSave(e.target.checked)}
+              className="rounded text-ios-tint focus:ring-ios-tint mt-0.5 w-4 h-4 cursor-pointer"
+            />
+            <label htmlFor="applyRuleToPastInRulesView" className="text-xs text-slate-800 dark:text-slate-200 cursor-pointer select-none">
+              <span className="font-semibold">Regel auch sofort auf bestehende Buchungen anwenden</span>
+              <span className="block text-[11px] text-ios-gray mt-0.5">
+                Kategorisiert alle bisherigen passenden Buchungen direkt rückwirkend um.
+              </span>
+            </label>
           </div>
 
           <div className="flex justify-end space-x-2 pt-2 border-t border-ios-separator dark:border-ios-darkSeparator">
