@@ -390,7 +390,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       </div>
 
       {/* Profil-PIN (Globaler Server-Schutz) */}
-      <div className="bg-white dark:bg-ios-darkCard rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
+      <div className="glass-surface rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${profile?.hasPin ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'}`}>
@@ -481,7 +481,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       </div>
 
       {/* Security & App Lock (Passkey / PIN) */}
-      <div className="bg-white dark:bg-ios-darkCard rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
+      <div className="glass-surface rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
         <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
           <Lock className="w-4 h-4 text-ios-tint" />
           <span>Sicherheit &amp; App-Sperre</span>
@@ -574,7 +574,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       </div>
 
             {/* Account & Initial Balance Management */}
-      <div className="bg-white dark:bg-ios-darkCard rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
+      <div className="glass-surface rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
         <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
           <Landmark className="w-4 h-4 text-ios-tint" />
           <span>Konto &amp; Startsaldo</span>
@@ -653,7 +653,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       </div>
 
       {/* Categories Management */}
-      <div className="bg-white dark:bg-ios-darkCard rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
+      <div className="glass-surface rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <Tag className="w-4 h-4 text-ios-tint" />
@@ -795,7 +795,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       </div>
 
       {/* Theme & Display */}
-      <div className="bg-white dark:bg-ios-darkCard rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
+      <div className="glass-surface rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
         <h3 className="font-bold text-sm text-slate-900 dark:text-white">Darstellung</h3>
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -818,7 +818,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       </div>
 
       {/* Backup & Data Management */}
-      <div className="bg-white dark:bg-ios-darkCard rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
+      <div className="glass-surface rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
         <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
           <Database className="w-4 h-4 text-ios-tint" />
           <span>Daten &amp; Backup</span>
