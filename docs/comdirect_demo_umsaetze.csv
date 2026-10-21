@@ -1,0 +1,21 @@
+"Umsätze Girokonto";"Zeitraum: 01.10.2026 - 21.10.2026";
+"Neuer Kontostand";"3.412,85 EUR";
+
+"Buchungstag";"Wertstellung (Valuta)";"Vorgang";"Buchungstext";"Umsatz in EUR"
+"01.10.2026";"01.10.2026";"Überweisung";"Auftraggeber: TechCorp Solutions GmbH Buchungstext: Gehalt Oktober 2026 Ref. 99281";"3.850,00"
+"02.10.2026";"02.10.2026";"Dauerauftrag";"Empfänger: Hausverwaltung Becker GmbH Buchungstext: Miete & Nebenkosten 10/2026";"-920,00"
+"03.10.2026";"03.10.2026";"Kartenverfügung";"Empfänger: REWE Markt Augsburg Buchungstext: Wocheneinkauf Kartenzahlung 03.10.";"-84,65"
+"05.10.2026";"05.10.2026";"Kartenverfügung";"Empfänger: ARAL Tankstelle Buchungstext: Super E10 Kraftstoff";"-78,40"
+"07.10.2026";"07.10.2026";"Lastschrift";"Empfänger: Netflix International B.V. Buchungstext: Monatsbeitrag Premium";"-17,99"
+"08.10.2026";"08.10.2026";"Lastschrift";"Empfänger: Spotify AB Buchungstext: Spotify Family Abo";"-14,99"
+"09.10.2026";"09.10.2026";"Kartenverfügung";"Empfänger: Pizzeria Da Salvatore Buchungstext: Abendessen mit Freunden";"-58,50"
+"10.10.2026";"10.10.2026";"Kartenverfügung";"Empfänger: dm-drogerie markt Buchungstext: Haushalt und Kosmetik";"-34,20"
+"12.10.2026";"12.10.2026";"Kartenverfügung";"Empfänger: ALDI Süd Augsburg Buchungstext: Lebensmittel Einkauf";"-42,80"
+"14.10.2026";"14.10.2026";"Überweisung";"Empfänger: Trade Republic Bank GmbH Buchungstext: Sparplan Core MSCI World";"-450,00"
+"15.10.2026";"15.10.2026";"Kartenverfügung";"Empfänger: Apple Store Muenchen Buchungstext: Zubehör und MagSafe";"-89,00"
+"16.10.2026";"16.10.2026";"Kartenverfügung";"Empfänger: Apotheke am Rathaus Buchungstext: Medikamente Rezeptgebühr";"-24,50"
+"17.10.2026";"17.10.2026";"Lastschrift";"Empfänger: Stadtwerke Augsburg GmbH Buchungstext: Abschlag Strom & Gas Oktober";"-135,00"
+"18.10.2026";"18.10.2026";"Kartenverfügung";"Empfänger: Shell Tankstelle Buchungstext: Autowäsche und Kaffee";"-19,50"
+"19.10.2026";"19.10.2026";"Überweisung";"Auftraggeber: Finanzamt Augsburg-Stadt Buchungstext: Einkommensteuer Erstattung 2025";"485,20"
+"20.10.2026";"20.10.2026";"Kartenverfügung";"Empfänger: Amazon.de EU S.a.r.l. Buchungstext: Elektronik und Haushaltswaren";"-64,90"
+"21.10.2026";"21.10.2026";"Kartenverfügung";"Empfänger: Cafe Barista Buchungstext: Cappuccino und Croissant";"-8,40"
