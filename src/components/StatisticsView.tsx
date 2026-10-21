@@ -16,7 +16,7 @@ const percentage = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1 });
 const months = Array.from({ length: 12 }, (_, index) =>
   new Intl.DateTimeFormat('de-DE', { month: 'long' }).format(new Date(2020, index, 1)));
 const card = 'rounded-3xl border border-ios-separator dark:border-ios-darkSeparator glass-surface p-4 sm:p-5 shadow-sm';
-const secondary = 'text-slate-600 dark:text-slate-400';
+const secondary = 'text-slate-600 dark:text-slate-300';
 const control = 'min-h-[48px] rounded-xl px-4 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ios-tint';
 
 function signedMoney(value: number): string {
@@ -107,28 +107,50 @@ export function StatisticsView({ transactions, categories, onSelectTransaction }
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-3">
-          <div className="inline-flex rounded-2xl bg-slate-100 dark:bg-neutral-800 p-1" role="group" aria-label="Zeitraumansicht">
+          <div className="inline-flex rounded-2xl glass-pill p-1 border border-ios-separator dark:border-ios-darkSeparator" role="group" aria-label="Zeitraumansicht">
             {(['year', 'month'] as const).map(value => (
               <button
                 key={value}
                 type="button"
                 aria-pressed={mode === value}
                 onClick={() => { setMode(value); clearCategory(); }}
-                className={`${control} ${mode === value ? 'bg-white dark:bg-neutral-700 shadow-sm' : secondary}`}
+                className={`${control} transition-all ${
+                  mode === value
+                    ? 'bg-ios-tint text-white shadow-sm font-bold'
+                    : 'text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white'
+                }`}
               >{value === 'year' ? 'Jahr' : 'Monat'}</button>
             ))}
           </div>
-          <label className={`flex min-w-24 flex-col gap-1 text-xs font-semibold ${secondary}`}>
-            Jahr
-            <select aria-label="Jahr" value={year} onChange={event => { setYear(Number(event.target.value)); clearCategory(); }} className={`${control} border border-slate-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-slate-900 dark:text-white`}>
-              {years.map(value => <option key={value} value={value}>{value}</option>)}
+          <label className="flex min-w-28 flex-col gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200">
+            <span>Jahr</span>
+            <select
+              aria-label="Jahr"
+              value={year}
+              onChange={event => { setYear(Number(event.target.value)); clearCategory(); }}
+              className={`${control} glass-surface border border-ios-separator dark:border-ios-darkSeparator text-slate-900 dark:text-white outline-none cursor-pointer shadow-sm`}
+            >
+              {years.map(value => (
+                <option key={value} value={value} className="bg-white dark:bg-neutral-900 text-slate-900 dark:text-white">
+                  {value}
+                </option>
+              ))}
             </select>
           </label>
           {mode === 'month' && (
-            <label className={`flex min-w-36 flex-col gap-1 text-xs font-semibold ${secondary}`}>
-              Monat
-              <select aria-label="Monat" value={month} onChange={event => { setMonth(Number(event.target.value)); clearCategory(); }} className={`${control} border border-slate-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-slate-900 dark:text-white`}>
-                {months.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}
+            <label className="flex min-w-36 flex-col gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200">
+              <span>Monat</span>
+              <select
+                aria-label="Monat"
+                value={month}
+                onChange={event => { setMonth(Number(event.target.value)); clearCategory(); }}
+                className={`${control} glass-surface border border-ios-separator dark:border-ios-darkSeparator text-slate-900 dark:text-white outline-none cursor-pointer shadow-sm`}
+              >
+                {months.map((name, index) => (
+                  <option key={name} value={index + 1} className="bg-white dark:bg-neutral-900 text-slate-900 dark:text-white">
+                    {name}
+                  </option>
+                ))}
               </select>
             </label>
           )}
@@ -166,10 +188,10 @@ export function StatisticsView({ transactions, categories, onSelectTransaction }
                 type="button"
                 aria-label={`${months[item.month - 1]} ${year}: Einnahmen ${currency.format(item.income)}, Ausgaben ${currency.format(item.expense)}, Netto ${signedMoney(item.net)}. Monat anzeigen`}
                 onClick={() => { setMonth(item.month); setMode('month'); clearCategory(); }}
-                className="min-w-0 rounded-2xl p-3 text-left hover:bg-slate-50 dark:hover:bg-neutral-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ios-tint"
+                className="min-w-0 rounded-2xl p-3 text-left glass-pill border border-ios-separator dark:border-ios-darkSeparator hover:border-ios-tint/50 transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-ios-tint"
               >
                 <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-xs">
-                  <span className="font-bold">{months[item.month - 1]}</span>
+                  <span className="font-bold text-slate-900 dark:text-white">{months[item.month - 1]}</span>
                   <span className={secondary}>Netto <span className={`font-semibold tabular-nums ${item.net < 0 ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{signedMoney(item.net)}</span></span>
                 </div>
                 <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5">
@@ -187,9 +209,20 @@ export function StatisticsView({ transactions, categories, onSelectTransaction }
       <section className={card} aria-labelledby="statistics-categories-title">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 id="statistics-categories-title" className="font-bold">{categoryLabel} nach Kategorie · {periodLabel}</h2>
-          <div role="group" aria-label="Kategorieauswertung" className="inline-flex rounded-2xl bg-slate-100 dark:bg-neutral-800 p-1">
+          <div role="group" aria-label="Kategorieauswertung" className="inline-flex rounded-2xl glass-pill p-1 border border-ios-separator dark:border-ios-darkSeparator">
             {(['expense', 'income'] as const).map(value => (
-              <button key={value} type="button" aria-label={value === 'expense' ? 'Ausgaben' : 'Einnahmen'} aria-pressed={direction === value} onClick={() => { setDirection(value); clearCategory(); }} className={`${control} ${direction === value ? 'bg-white dark:bg-neutral-700 shadow-sm' : secondary}`}>
+              <button
+                key={value}
+                type="button"
+                aria-label={value === 'expense' ? 'Ausgaben' : 'Einnahmen'}
+                aria-pressed={direction === value}
+                onClick={() => { setDirection(value); clearCategory(); }}
+                className={`${control} transition-all ${
+                  direction === value
+                    ? 'bg-ios-tint text-white shadow-sm font-bold'
+                    : 'text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
                 {value === 'expense' ? 'Ausgaben' : 'Einnahmen'}
               </button>
             ))}
@@ -216,7 +249,7 @@ export function StatisticsView({ transactions, categories, onSelectTransaction }
                     aria-label={`${category.name}: ${currency.format(category.amount)}, ${percentage.format(category.share)} %, ${category.count} Buchungen`}
                     aria-pressed={selectedCategoryId === category.id}
                     onClick={() => selectCategory(category.id)}
-                    className={`w-full min-h-[56px] flex items-center gap-2 rounded-2xl border p-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-ios-tint ${selectedCategoryId === category.id ? 'border-ios-tint bg-ios-tint/10' : 'border-transparent hover:bg-slate-50 dark:hover:bg-neutral-800'}`}
+                    className={`w-full min-h-[56px] flex items-center gap-2 rounded-2xl border p-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-ios-tint transition-all ${selectedCategoryId === category.id ? 'border-ios-tint bg-ios-tint/15 shadow-sm' : 'border-transparent glass-pill hover:border-ios-separator dark:hover:border-ios-darkSeparator'}`}
                   >
                     <span className={`w-5 shrink-0 text-xs tabular-nums ${secondary}`}>{index + 1}.</span>
                     <CategoryIcon name={category.icon} className="w-5 h-5 shrink-0 text-slate-500 dark:text-slate-400" />
