@@ -19,8 +19,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onTabChange, tx
   ];
 
   return (
-    <nav className="w-full flex-shrink-0 z-30 backdrop-blur-2xl bg-white/85 dark:bg-neutral-900/85 border-t border-ios-separator dark:border-ios-darkSeparator pt-1 pb-[env(safe-area-inset-bottom,0px)] transition-colors">
-      <div className="max-w-md mx-auto grid grid-cols-5 items-center h-[50px] px-1 sm:px-2">
+    <nav className="glass-dock w-full z-30 pt-1 pb-[env(safe-area-inset-bottom,0px)] transition-colors">
+      <div className="grid grid-cols-5 items-center min-h-[56px] px-1 sm:px-3 gap-1">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -30,7 +30,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onTabChange, tx
               onClick={() => onTabChange(tab.id)}
               aria-label={tab.label}
               aria-current={isActive ? 'page' : undefined}
-              className={`min-w-0 flex flex-col items-center justify-center relative py-0.5 transition-transform active:scale-95 ${
+              data-active={isActive}
+              className={`glass-nav-item min-w-0 flex flex-col items-center justify-center relative py-1.5 min-h-[50px] transition-transform active:scale-95 ${
                 isActive ? 'text-ios-tint font-semibold' : 'text-ios-gray hover:text-slate-700 dark:hover:text-slate-300'
               }`}
             >
