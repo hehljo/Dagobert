@@ -241,3 +241,51 @@
     background: #fff;
   }
 }
+
+/* ==========================================================================
+   Precision Scrollbar Treatment: Inset margins prevent clipping rounded corners
+   ========================================================================== */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.20) transparent;
+}
+
+:root:not(.dark) * {
+  scrollbar-color: rgba(0, 0, 0, 0.20) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 16px 0; /* Inset ensures scrollbar thumb never overlaps border-radius */
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.38);
+}
+
+:root:not(.dark) ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+:root:not(.dark) ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.38);
+}
+
+/* Inner compact scroll containers */
+.max-h-40::-webkit-scrollbar-track,
+.max-h-60::-webkit-scrollbar-track,
+.max-h-36::-webkit-scrollbar-track,
+.max-h-24::-webkit-scrollbar-track {
+  margin: 6px 0;
+}
