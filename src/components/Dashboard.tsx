@@ -38,44 +38,61 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return transactions.filter(t => t.date.startsWith(selectedMonth));
   }, [transactions, selectedMonth]);
 
-  // Calculate monthly cashflow totals
-  const { income, expense, balance, savingsRate } = useMemo(() => {
-    let inc = 0;
-    let exp = 0;
+  // Calculate monthly cashflow totals & net category expenses
+  // Reimbursements and refunds in expense/transfer categories directly offset category expenses
+  const { income, expense, balance, savingsRate, categorySlices } = useMemo(() => {
+    const netCategoryMap = new Map<string, number>();
+    let grossIncome = 0;
+    let totalBal = 0;
+
     for (const t of monthTransactions) {
-      if (t.amount > 0) {
-        inc += t.amount;
+      totalBal += t.amount;
+      const catId = t.category || 'sonstiges';
+      const c = catMap.get(catId);
+
+      if (c?.type === 'income') {
+        grossIncome += t.amount;
       } else {
-        exp += Math.abs(t.amount);
-      }
-    }
-    const bal = inc - exp;
-    const rate = inc > 0 ? Math.max(0, Math.round((bal / inc) * 100)) : 0;
-    return { income: inc, expense: exp, balance: bal, savingsRate: rate };
-  }, [monthTransactions]);
-
-  // Donut Slices
-  const categorySlices: DonutSlice[] = useMemo(() => {
-    const expenseMap = new Map<string, number>();
-    for (const t of monthTransactions) {
-      if (t.amount < 0) {
-        const cat = t.category || 'sonstiges';
-        expenseMap.set(cat, (expenseMap.get(cat) || 0) + Math.abs(t.amount));
+        const current = netCategoryMap.get(catId) || 0;
+        netCategoryMap.set(catId, current - t.amount);
       }
     }
 
-    return Array.from(expenseMap.entries())
-      .map(([catId, amount]) => {
-        const c = catMap.get(catId);
-        return {
+    let netExpenseSum = 0;
+    let refundSurplus = 0;
+    const slices: DonutSlice[] = [];
+
+    for (const [catId, netAmount] of netCategoryMap.entries()) {
+      const c = catMap.get(catId);
+      if (netAmount > 0.001) {
+        const rounded = Math.round((netAmount + Number.EPSILON) * 100) / 100;
+        netExpenseSum += rounded;
+        slices.push({
           id: catId,
           label: c?.name || catId,
-          value: amount,
+          value: rounded,
           color: c?.color || '#8E8E93',
           icon: c?.icon || 'Package'
-        };
-      })
-      .sort((a, b) => b.value - a.value);
+        });
+      } else if (netAmount < -0.001) {
+        refundSurplus += Math.abs(netAmount);
+      }
+    }
+
+    slices.sort((a, b) => b.value - a.value);
+
+    const effectiveExpense = Math.round((netExpenseSum + Number.EPSILON) * 100) / 100;
+    const effectiveIncome = Math.round((grossIncome + refundSurplus + Number.EPSILON) * 100) / 100;
+    const roundedBal = Math.round((totalBal + Number.EPSILON) * 100) / 100;
+    const rate = effectiveIncome > 0 ? Math.max(0, Math.round((roundedBal / effectiveIncome) * 100)) : 0;
+
+    return {
+      income: effectiveIncome,
+      expense: effectiveExpense,
+      balance: roundedBal,
+      savingsRate: rate,
+      categorySlices: slices
+    };
   }, [monthTransactions, catMap]);
 
   // Month navigation helpers
@@ -213,6 +230,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
           <button
             onClick={onOpenImport}
+            aria-label="Erste comdirect CSV importieren"
             className="inline-flex items-center space-x-2 px-5 py-3 rounded-2xl bg-ios-tint text-white font-semibold shadow-md hover:brightness-110 active:scale-95 transition-all min-h-[48px]"
           >
             <Upload className="w-5 h-5" />
