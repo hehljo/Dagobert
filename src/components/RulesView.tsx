@@ -65,14 +65,24 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
 
   const handleStartEditRule = (rule: CategoryRule) => {
     setApplyToExistingOnSave(true);
+    let conds: RuleCondition[] = [];
+    if (Array.isArray(rule.conditions) && rule.conditions.length > 0) {
+      conds = rule.conditions.map(c => ({ ...c }));
+    } else if (typeof rule.conditions === 'string') {
+      try {
+        const parsed = JSON.parse(rule.conditions);
+        if (Array.isArray(parsed) && parsed.length > 0) conds = parsed;
+      } catch (e) { console.warn('Regel-Bedingungen JSON ungültig:', e); }
+    }
+    if (conds.length === 0) {
+      conds = [{ field: 'payee', operator: 'contains', value: '' }];
+    }
     setEditingRule({
       id: rule.id,
       name: rule.name,
       priority: rule.priority ?? 5,
       applyCategory: rule.applyCategory,
-      conditions: rule.conditions && rule.conditions.length > 0
-        ? rule.conditions.map(c => ({ ...c }))
-        : [{ field: 'payee', operator: 'contains', value: '' }],
+      conditions: conds,
       enabled: rule.enabled,
       isNew: false
     });
@@ -279,9 +289,18 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
         </p>
       )}
 
-      {/* Create / Edit Rule Modal / Form */}
+      {/* Create / Edit Rule Modal */}
       {editingRule && (
-        <form onSubmit={handleSaveRule} className="glass-surface p-5 rounded-3xl shadow-lg border-2 border-ios-tint/40 space-y-4 animate-fade-in text-xs">
+        <div
+          className="glass-overlay fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setEditingRule(null);
+          }}
+        >
+          <form
+            onSubmit={handleSaveRule}
+            className="glass-surface w-full max-w-2xl rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl max-h-[90dvh] overflow-y-auto space-y-4 border border-ios-separator dark:border-ios-darkSeparator text-xs"
+          >
           <div className="flex items-center justify-between pb-2 border-b border-ios-separator dark:border-ios-darkSeparator">
             <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
               {editingRule.isNew ? <Plus className="w-4 h-4 text-ios-tint" /> : <Pencil className="w-4 h-4 text-ios-tint" />}
@@ -458,6 +477,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
             </button>
           </div>
         </form>
+        </div>
       )}
 
       {/* Rules List */}
@@ -529,7 +549,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
                   <button
                     onClick={() => handleStartEditRule(rule)}
                     disabled={isApplying || isLoadingDefaults}
-                    className="p-2 text-slate-400 hover:text-ios-tint transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-neutral-800"
+                    className="p-2 min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-400 hover:text-ios-tint transition-colors rounded-xl hover:bg-slate-100 dark:hover:bg-neutral-800"
                     title="Regel bearbeiten"
                     aria-label={`Regel ${rule.name} bearbeiten`}
                   >
