@@ -48,7 +48,7 @@ Bestehende Self-Hosted-Finanztools (wie *Firefly III* oder *Actual Budget*) sind
 ## 🚀 Kern-Features
 
 ### 🔒 Kompromisslose Privatsphäre & Sicherheit
-- **100 % Local-First & DSGVO-konform:** Deine Bankumsätze und Salden verlassen niemals dein eigenes Heimnetzwerk. Keine Drittanbieter, kein Tracking.
+- **100 % Local-First:** Deine Bankumsätze und Salden bleiben auf deinem eigenen Server. Die App lädt keine Inhalte von Drittanbietern, es gibt kein Tracking und keine Telemetrie.
 - **Globale Server-PIN:** Schützt Profile serverseitig in SQLite mit Brute-Force-Sperre (Rate-Limiting) und 12h-Sitzung. Bevor eine PIN nicht verifiziert ist, liefert die API keinen einzigen Datensatz aus.
 - **Biometrische App-Sperre:** Unterstützt zusätzlich Passkeys (Face ID / Touch ID) sowie lokale Geräte-PINs.
 
