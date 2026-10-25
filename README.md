@@ -1,7 +1,7 @@
 # Dagobert 🪙
 
 <p align="center">
-  <img src="docs/IconDagobertV2.png" width="120" height="120" alt="Dagobert Icon" style="border-radius: 28px;">
+  <img src="docs/IconDagobertV3.png" width="120" height="120" alt="Dagobert Icon">
 </p>
 
 <p align="center">
