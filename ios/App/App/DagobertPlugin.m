@@ -1,0 +1,29 @@
+#import <Foundation/Foundation.h>
+#import <Capacitor/Capacitor.h>
+
+CAP_PLUGIN(DagobertPlugin, "DagobertPlugin",
+    CAP_PLUGIN_METHOD(getProfiles, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(createProfile, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(updateProfile, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(deleteProfile, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(unlockProfile, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(getProfileData, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(batchImportTransactions, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(createManualTransaction, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(updateTransaction, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(deleteTransaction, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(updateAccountSettings, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(createCategory, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(deleteCategory, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(createRule, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(deleteRule, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(loadStandardRules, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(exportBackup, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(importBackup, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(resetProfileData, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(getSyncStatus, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(setSyncEnabled, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(triggerSync, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(authenticateBiometrics, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(canUseBiometrics, CAPPluginReturnPromise);
+)

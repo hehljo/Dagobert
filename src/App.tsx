@@ -22,6 +22,9 @@ import { LockScreen } from './components/LockScreen.tsx';
 import { ProfileUnlock } from './components/ProfileUnlock.tsx';
 import { getSecurityConfig } from './lib/passkey.ts';
 
+import { StatusBar, Style } from '@capacitor/status-bar';
+import { detectPlatform } from './platform/capabilities.ts';
+
 export function App() {
   const [isUnlocked, setIsUnlocked] = useState(() => !getSecurityConfig().enabled);
   return isUnlocked ? <UnlockedApp /> : <LockScreen onUnlock={() => setIsUnlocked(true)} />;
@@ -149,6 +152,10 @@ function UnlockedApp() {
     } else {
       document.documentElement.classList.remove('dark');
       localStorage.setItem('dagobert_theme', 'light');
+    }
+
+    if (detectPlatform().isNative) {
+      StatusBar.setStyle({ style: isDark ? Style.Dark : Style.Light }).catch(() => {});
     }
   }, [isDark]);
 

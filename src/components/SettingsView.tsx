@@ -1,12 +1,17 @@
 import type { Account, Category, Profile } from '../types/index.ts';
-import React, { useState } from 'react';
-import { Download, Upload, Trash2, Shield, Moon, Sun, Database, Sparkles, Fingerprint, KeyRound, Lock, Check, Landmark, Tag, Plus, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Download, Upload, Trash2, Shield, Moon, Sun, Database, Sparkles, Fingerprint, KeyRound, Lock, Check, Landmark, Tag, Plus, X, Cloud, CloudOff, RefreshCw, Share2 } from 'lucide-react';
 // db helpers
 import { parseGermanAmount } from '../lib/csvParser.ts';
-import { updateAccountSettings, exportProfileBackup, importProfileBackup, resetProfileData, batchImportTransactions, createCategory, deleteCategory, updateProfilePin } from '../lib/api.ts';
+import { updateAccountSettings, exportProfileBackup, resetProfileData, batchImportTransactions, createCategory, deleteCategory, updateProfilePin } from '../lib/api.ts';
 import { APP_VERSION, BUILD_DATE } from '../version.ts';
 import { getSecurityConfig, saveSecurityConfig, registerPasskey, isPasskeySupported, hashPin, type SecurityConfig } from '../lib/passkey.ts';
 import { CategoryIcon, AVAILABLE_CATEGORY_ICONS, AVAILABLE_CATEGORY_COLORS } from './CategoryIcon.tsx';
+import { BackupImportModal } from './BackupImportModal.tsx';
+import { getRepository } from '../data/repository.ts';
+import { detectPlatform } from '../platform/capabilities.ts';
+import type { CloudKitSyncStatus } from '../data/interfaces.ts';
+import { Share } from '@capacitor/share';
 
 interface SettingsViewProps {
   profile?: Profile;
@@ -147,7 +152,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       return;
     }
 
-    // Try passkey if supported
+    // 1. Try native iOS Face ID / Touch ID
+    if (nativeBiometricsAvailable && getRepository().authenticateBiometrics) {
+      try {
+        const ok = await getRepository().authenticateBiometrics!('App-Sperre mit Face ID / Touch ID aktivieren');
+        if (ok) {
+          const next: SecurityConfig = { enabled: true, type: 'passkey' };
+          saveSecurityConfig(next);
+          setSecurity(next);
+          setSecNotice('Face ID / Touch ID erfolgreich eingerichtet!');
+          return;
+        }
+      } catch (err: unknown) {
+        console.warn('Native biometric setup not completed:', err);
+      }
+    }
+
+    // 2. Try WebAuthn passkey if supported
     if (isPasskeySupported()) {
       try {
         const credId = await registerPasskey('Johannes Hehl');
@@ -182,100 +203,82 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
     setSecNotice('PIN-Sperre erfolgreich aktiviert!');
   };
 
-  const handleExportBackup = async () => {
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<CloudKitSyncStatus | null>(null);
+  const [isSyncingNow, setIsSyncingNow] = useState(false);
+  const [nativeBiometricsAvailable, setNativeBiometricsAvailable] = useState(false);
+  const platform = detectPlatform();
+
+  // Load CloudKit & Biometrics status
+  useEffect(() => {
+    const repo = getRepository();
+    if (repo.getSyncStatus) {
+      repo.getSyncStatus().then(setSyncStatus).catch(() => {});
+    }
+    if (repo.canUseBiometrics) {
+      repo.canUseBiometrics().then(setNativeBiometricsAvailable).catch(() => {});
+    }
+  }, []);
+
+  const handleToggleSync = async () => {
+    const repo = getRepository();
+    if (!repo.setSyncEnabled) return;
+    const next = !syncStatus?.enabled;
+    try {
+      await repo.setSyncEnabled(next);
+      const updated = await repo.getSyncStatus?.();
+      if (updated) setSyncStatus(updated);
+    } catch (err: any) {
+      alert(err.message || 'Fehler beim Ändern des iCloud-Status.');
+    }
+  };
+
+  const handleTriggerSync = async () => {
+    const repo = getRepository();
+    if (!repo.triggerSync) return;
+    setIsSyncingNow(true);
+    try {
+      await repo.triggerSync();
+      const updated = await repo.getSyncStatus?.();
+      if (updated) setSyncStatus(updated);
+      onDataChanged();
+    } catch (err: any) {
+      alert(err.message || 'Synchronisierung fehlgeschlagen.');
+    } finally {
+      setIsSyncingNow(false);
+    }
+  };
+
+  const handleExportBackup = async (allProfiles = false) => {
     setIsExporting(true);
     try {
-      const data = await exportProfileBackup(profileId);
+      const data = await exportProfileBackup(profileId, allProfiles);
+      const jsonStr = JSON.stringify(data, null, 2);
+      const filename = `dagobert_${allProfiles ? 'gesamtbackup' : 'backup'}_${new Date().toISOString().slice(0, 10)}.json`;
 
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      // Check Native Share Sheet
+      if (platform.isNative) {
+        try {
+          await Share.share({
+            title: 'Dagobert Backup',
+            text: jsonStr,
+            dialogTitle: 'Dagobert Sicherung speichern oder teilen'
+          });
+          return;
+        } catch {
+          // Fallback to browser blob below
+        }
+      }
+
+      const blob = new Blob([jsonStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `dagobert_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
     } finally {
       setIsExporting(false);
-    }
-  };
-
-  const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-
-      // 1. Strict Deep Validation:
-      if (!data || typeof data !== 'object') {
-        throw new Error('Ungültiges Dateiformat (kein JSON-Objekt).');
-      }
-
-      const hasTxs = Array.isArray(data.transactions);
-      const hasCats = Array.isArray(data.categories);
-      const hasRules = Array.isArray(data.rules);
-      const hasTemplates = Array.isArray(data.bankTemplates);
-      const hasAccounts = Array.isArray(data.accounts);
-
-      if (!hasTxs && !hasCats && !hasRules && !hasAccounts && !hasTemplates) {
-        throw new Error('Die Backup-Datei enthält keine bekannten Dagobert-Daten.');
-      }
-
-      // Deep validate every transaction record
-      if (hasTxs) {
-        for (const t of data.transactions) {
-          if (!t || typeof t !== 'object') {
-            throw new Error('Backup enthält ungültige Buchungsobjekte.');
-          }
-          if (typeof t.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(t.date)) {
-            throw new Error(`Backup enthält Buchung mit ungültigem Datum: ${t.date}`);
-          }
-          if (typeof t.amount !== 'number' || !Number.isFinite(t.amount)) {
-            throw new Error('Backup enthält Buchung mit ungültigem Betrag.');
-          }
-          if (typeof t.category !== 'string' || !t.category) {
-            throw new Error('Backup enthält Buchung ohne Kategorie.');
-          }
-          // Ensure payee is a valid string to prevent toLowerCase crashes
-          if (typeof t.payee !== 'string') {
-            t.payee = 'Unbekannt';
-          }
-        }
-      }
-
-      // Deep validate accounts (strictly check checkpointBalance is number if present)
-      if (hasAccounts) {
-        for (const a of data.accounts) {
-          if (!a || typeof a !== 'object' || !a.id || !a.name || typeof a.initialBalance !== 'number' || !Number.isFinite(a.initialBalance) || typeof a.initialBalanceDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(a.initialBalanceDate)) {
-            throw new Error('Backup enthält unvollständige oder beschädigte Kontodatensätze.');
-          }
-          if (a.checkpointBalance !== undefined && (typeof a.checkpointBalance !== 'number' || !Number.isFinite(a.checkpointBalance))) {
-            throw new Error(`Konto ${a.id} hat ungültigen checkpointBalance (muss Zahl sein): ${a.checkpointBalance}`);
-          }
-          if (a.checkpointDate !== undefined && (typeof a.checkpointDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(a.checkpointDate))) {
-            throw new Error(`Konto ${a.id} hat ungültiges checkpointDate (muss YYYY-MM-DD sein): ${a.checkpointDate}`);
-          }
-        }
-      }
-
-      // Deep validate categories
-      if (hasCats) {
-        for (const c of data.categories) {
-          if (!c || !c.id || !c.name) {
-            throw new Error('Backup enthält beschädigte Kategoriedaten.');
-          }
-        }
-      }
-
-      // Save directly to central SQLite database on server!
-      await importProfileBackup(profileId, data);
-      alert('Backup erfolgreich in die zentrale Datenbank übernommen!');
-      onDataChanged();
-    } catch (err: unknown) {
-      alert(`Fehler beim Wiederherstellen: ${err instanceof Error ? err.message : 'Ungültige Datei'}`);
-    } finally {
-      e.target.value = ''; // Reset input
     }
   };
 
@@ -817,6 +820,78 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
         </div>
       </div>
 
+      {/* iCloud Synchronization (Native & CloudKit) */}
+      <div className="glass-surface rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/50 flex items-center justify-center">
+              {syncStatus?.enabled ? <Cloud className="w-5 h-5 text-ios-tint" /> : <CloudOff className="w-5 h-5 text-ios-gray" />}
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">iCloud-Synchronisierung</p>
+              <p className="text-xs text-ios-gray">
+                Private CloudKit-Datenbank für iPhone &amp; iPad
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleToggleSync}
+            disabled={!platform.hasCloudKit}
+            aria-label={syncStatus?.enabled ? "iCloud-Sync deaktivieren" : "iCloud-Sync aktivieren"}
+            className={`w-12 h-7 rounded-full p-1 transition-colors ${syncStatus?.enabled ? 'bg-ios-green' : 'bg-slate-300 dark:bg-neutral-700'} ${!platform.hasCloudKit ? 'opacity-40 cursor-not-allowed' : ''}`}
+          >
+            <div className={`w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${syncStatus?.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
+          </button>
+        </div>
+
+        {!platform.hasCloudKit && (
+          <p className="text-[11px] text-ios-gray bg-slate-50 dark:bg-neutral-800/50 p-2.5 rounded-xl border border-ios-separator/50 dark:border-ios-darkSeparator/50">
+            iCloud-Synchronisierung ist exklusiv in der nativen iOS-App aktiv. Die Web-/Docker-Version nutzt die zentrale SQLite-Datenbank.
+          </p>
+        )}
+
+        {platform.hasCloudKit && (
+          <div className="space-y-3 pt-2 border-t border-ios-separator dark:border-ios-darkSeparator text-xs">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-neutral-800/50 border border-ios-separator/50 dark:border-ios-darkSeparator/50">
+                <span className="text-ios-gray text-[10px] block">Status</span>
+                <span className="font-semibold text-slate-900 dark:text-white capitalize">
+                  {syncStatus?.state === 'syncing' ? 'Synchronisiert...' : (syncStatus?.state === 'idle' ? 'Bereit' : (syncStatus?.state === 'offline' ? 'Offline' : (syncStatus?.state === 'disabled' ? 'Deaktiviert' : 'Fehler')))}
+                </span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-neutral-800/50 border border-ios-separator/50 dark:border-ios-darkSeparator/50">
+                <span className="text-ios-gray text-[10px] block">Ausstehende Änderungen</span>
+                <span className="font-semibold text-slate-900 dark:text-white">
+                  {syncStatus?.pendingChangesCount || 0}
+                </span>
+              </div>
+            </div>
+
+            {syncStatus?.lastSyncAt && (
+              <p className="text-[11px] text-ios-gray">
+                Letzter erfolgreicher Sync: {new Date(syncStatus.lastSyncAt).toLocaleString('de-DE')}
+              </p>
+            )}
+
+            {syncStatus?.errorMessage && (
+              <p className="text-[11px] text-ios-red bg-ios-red/10 p-2.5 rounded-xl border border-ios-red/20">
+                {syncStatus.errorMessage}
+              </p>
+            )}
+
+            <button
+              onClick={handleTriggerSync}
+              disabled={isSyncingNow || !syncStatus?.enabled}
+              className="w-full flex items-center justify-center space-x-2 p-2.5 rounded-xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 font-semibold transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-ios-tint ${isSyncingNow ? 'animate-spin' : ''}`} />
+              <span>{isSyncingNow ? 'Wird synchronisiert...' : 'Jetzt synchronisieren'}</span>
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Backup & Data Management */}
       <div className="glass-surface rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
         <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
@@ -824,21 +899,32 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
           <span>Daten &amp; Backup</span>
         </h3>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
           <button
-            onClick={handleExportBackup}
+            onClick={() => handleExportBackup(false)}
             disabled={isExporting}
-            className="flex items-center justify-center space-x-2 p-3.5 rounded-2xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 text-xs font-semibold transition-colors"
+            className="flex items-center justify-center space-x-1.5 p-3 rounded-2xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 text-xs font-semibold transition-colors"
           >
-            <Download className="w-4 h-4 text-ios-tint" />
-            <span>JSON Backup exportieren</span>
+            <Download className="w-3.5 h-3.5 text-ios-tint" />
+            <span>Profil sichern</span>
           </button>
 
-          <label className="flex items-center justify-center space-x-2 p-3.5 rounded-2xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 text-xs font-semibold cursor-pointer transition-colors">
-            <Upload className="w-4 h-4 text-ios-tint" />
-            <span>Backup wiederherstellen</span>
-            <input type="file" accept=".json" onChange={handleImportBackup} className="hidden" />
-          </label>
+          <button
+            onClick={() => handleExportBackup(true)}
+            disabled={isExporting}
+            className="flex items-center justify-center space-x-1.5 p-3 rounded-2xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 text-xs font-semibold transition-colors"
+          >
+            <Share2 className="w-3.5 h-3.5 text-ios-tint" />
+            <span>Alle Profile</span>
+          </button>
+
+          <button
+            onClick={() => setIsBackupModalOpen(true)}
+            className="flex items-center justify-center space-x-1.5 p-3 rounded-2xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 text-xs font-semibold transition-colors"
+          >
+            <Upload className="w-3.5 h-3.5 text-ios-tint" />
+            <span>Wiederherstellen</span>
+          </button>
         </div>
 
         <div className="pt-2 border-t border-ios-separator dark:border-ios-darkSeparator flex flex-col sm:flex-row items-center justify-between gap-3">
@@ -859,6 +945,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
           </button>
         </div>
       </div>
+
+      <BackupImportModal
+        isOpen={isBackupModalOpen}
+        profileId={profileId}
+        onClose={() => setIsBackupModalOpen(false)}
+        onImportComplete={() => {
+          onDataChanged();
+          alert('Backup erfolgreich wiederhergestellt!');
+        }}
+      />
     
       {/* App Version & Build Info */}
       <div className="text-center py-4 text-xs text-ios-gray space-y-1">

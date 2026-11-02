@@ -1,42 +1,23 @@
 import type { Profile, Account, Category, CategoryRule, Transaction, BankTemplate, CsvMetadata } from '../types/index.ts';
+import { getRepository } from '../data/repository.ts';
+import type { BackupPayload, BackupImportMode } from '../data/interfaces.ts';
+import { ProfileLockedError } from '../data/webAdapter.ts';
 
-const BASE_URL = ''; // Relative to current host so it works across any IP/domain/Tailscale!
-
-export class ProfileLockedError extends Error {}
+export { ProfileLockedError };
 
 export async function fetchProfiles(): Promise<Profile[]> {
-  const res = await fetch(`${BASE_URL}/api/profiles`);
-  if (!res.ok) throw new Error('Fehler beim Laden der Profile');
-  return res.json();
+  return getRepository().getProfiles();
 }
 
 export async function createProfile(name: string, icon: string = 'User', color: string = '#0A84FF', pin?: string): Promise<Profile> {
-  const res = await fetch(`${BASE_URL}/api/profiles`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, icon, color, pin })
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Fehler beim Erstellen des Profils');
-  }
-  return res.json();
+  return getRepository().createProfile(name, icon, color, pin);
 }
 
 export async function updateProfile(
   profileId: string,
   updates: { name?: string; icon?: string; color?: string; pin?: string; removePin?: boolean }
 ): Promise<{ success: boolean; hasPin: boolean }> {
-  const res = await fetch(`${BASE_URL}/api/profiles/${encodeURIComponent(profileId)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates)
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || "Fehler beim Aktualisieren des Profils");
-  }
-  return res.json();
+  return getRepository().updateProfile(profileId, updates);
 }
 
 export async function updateProfilePin(
@@ -51,17 +32,7 @@ export async function updateProfilePin(
 }
 
 export async function unlockProfile(profileId: string, pin: string): Promise<boolean> {
-  const res = await fetch(`${BASE_URL}/api/profiles/${profileId}/unlock`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pin })
-  });
-  if (res.status === 401) return false;
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'Entsperren fehlgeschlagen. Bitte die Verbindung prüfen.');
-  }
-  return res.ok;
+  return getRepository().unlockProfile(profileId, pin);
 }
 
 export async function fetchProfileData(profileId: string): Promise<{
@@ -72,10 +43,7 @@ export async function fetchProfileData(profileId: string): Promise<{
   transactions: Transaction[];
   bankTemplates: BankTemplate[];
 }> {
-  const res = await fetch(`${BASE_URL}/api/data?profileId=${encodeURIComponent(profileId)}`);
-  if (res.status === 401) throw new ProfileLockedError();
-  if (!res.ok) throw new Error('Fehler beim Laden der Kontodaten');
-  return res.json();
+  return getRepository().getProfileData(profileId);
 }
 
 export async function batchImportTransactions(
@@ -83,44 +51,19 @@ export async function batchImportTransactions(
   transactions: Partial<Transaction>[],
   accountCheckpoint?: CsvMetadata
 ): Promise<{ inserted: number; updated: number; duplicates: number }> {
-  const res = await fetch(`${BASE_URL}/api/transactions/batch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      profileId,
-      transactions,
-      accountCheckpoint
-    })
-  });
-  if (!res.ok) throw new Error('Fehler beim Speichern der Buchungen');
-  return res.json();
+  return getRepository().batchImportTransactions(profileId, transactions, accountCheckpoint);
 }
 
-export async function createManualTransaction(profileId: string, transaction: Transaction): Promise<number> {
-  const res = await fetch(`${BASE_URL}/api/transactions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profileId, transaction })
-  });
-  if (!res.ok) throw new Error('Fehler beim Anlegen der Buchung');
-  const data = await res.json();
-  return data.id;
+export async function createManualTransaction(profileId: string, transaction: Transaction): Promise<number | string> {
+  return getRepository().createManualTransaction(profileId, transaction);
 }
 
-export async function updateExistingTransaction(id: number, transaction: Partial<Transaction>): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/transactions/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ transaction })
-  });
-  if (!res.ok) throw new Error('Fehler beim Aktualisieren der Buchung');
+export async function updateExistingTransaction(id: number | string, transaction: Partial<Transaction>): Promise<void> {
+  return getRepository().updateTransaction(id, transaction);
 }
 
-export async function deleteExistingTransaction(id: number): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/transactions/${id}`, {
-    method: 'DELETE'
-  });
-  if (!res.ok) throw new Error('Fehler beim Löschen der Buchung');
+export async function deleteExistingTransaction(id: number | string): Promise<void> {
+  return getRepository().deleteTransaction(id);
 }
 
 export async function updateAccountSettings(
@@ -131,88 +74,41 @@ export async function updateAccountSettings(
   checkpointBalance?: number | null,
   checkpointDate?: string | null
 ): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/accounts/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profileId, initialBalance, initialBalanceDate, checkpointBalance, checkpointDate })
-  });
-  if (!res.ok) throw new Error('Fehler beim Aktualisieren des Kontos');
+  return getRepository().updateAccountSettings(profileId, id, initialBalance, initialBalanceDate, checkpointBalance, checkpointDate);
 }
 
 export async function createCategoryRule(profileId: string, rule: CategoryRule): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/rules`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profileId, rule })
-  });
-  if (!res.ok) throw new Error('Fehler beim Speichern der Regel');
+  return getRepository().createRule(profileId, rule);
 }
 
 export async function loadStandardCategoryRules(profileId: string): Promise<{ inserted: number; updated: number }> {
-  const res = await fetch(`${BASE_URL}/api/rules/defaults`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profileId })
-  });
-  if (!res.ok) throw new Error('Standard-Regeln konnten nicht geladen werden. Bitte erneut versuchen.');
-  return res.json();
+  return getRepository().loadStandardRules(profileId);
 }
 
 export async function deleteCategoryRule(id: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/rules/${id}`, {
-    method: 'DELETE'
-  });
-  if (!res.ok) throw new Error('Fehler beim Löschen der Regel');
+  return getRepository().deleteRule('privat', id);
 }
 
 export async function deleteCategoryRuleScoped(profileId: string, id: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/rules/${id}?profileId=${encodeURIComponent(profileId)}`, {
-    method: 'DELETE'
-  });
-  if (!res.ok) throw new Error('Fehler beim Löschen der Regel');
+  return getRepository().deleteRule(profileId, id);
 }
 
 export async function createCategory(profileId: string, category: Partial<Category>): Promise<Category> {
-  const res = await fetch(`${BASE_URL}/api/categories`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profileId, category })
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Fehler beim Speichern der Kategorie');
-  }
-  const data = await res.json();
-  return data.category;
+  return getRepository().createCategory(profileId, category);
 }
 
 export async function deleteCategory(profileId: string, id: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/categories/${encodeURIComponent(id)}?profileId=${encodeURIComponent(profileId)}`, {
-    method: 'DELETE'
-  });
-  if (!res.ok) throw new Error('Fehler beim Löschen der Kategorie');
+  return getRepository().deleteCategory(profileId, id);
 }
 
-export async function exportProfileBackup(profileId: string): Promise<any> {
-  const res = await fetch(`${BASE_URL}/api/backup?profileId=${encodeURIComponent(profileId)}`);
-  if (!res.ok) throw new Error('Fehler beim Exportieren des Backups');
-  return res.json();
+export async function exportProfileBackup(profileId: string, includeAllProfiles = false): Promise<BackupPayload> {
+  return getRepository().exportBackup(profileId, includeAllProfiles);
 }
 
-export async function importProfileBackup(profileId: string, data: any): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/backup/import`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profileId, data })
-  });
-  if (!res.ok) throw new Error('Fehler beim Wiederherstellen des Backups');
+export async function importProfileBackup(profileId: string, data: any, mode: BackupImportMode = 'replace'): Promise<void> {
+  return getRepository().importBackup(profileId, data, mode);
 }
 
 export async function resetProfileData(profileId: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api/reset`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profileId })
-  });
-  if (!res.ok) throw new Error('Fehler beim Zurücksetzen des Profils');
+  return getRepository().resetProfileData(profileId);
 }

@@ -10,6 +10,31 @@ dist-ssr
 *.ntvs*
 *.njsproj
 *.sln
-*.sw?
+# Xcode
+*.xcuserstate
+xcuserdata/
+ios/App/App.xcodeproj/xcuserdata/
+ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
 tsconfig.tsbuildinfo
 .ruttla-evidence/
+
+# Databases & local persistent storage
+data/*.db
+data/*.db-wal
+data/*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+
+# Certificates, keys & provisioning profiles
+*.p12
+*.cer
+*.key
+*.mobileprovision
+*.pem
+
+# Backups & dumps
+dagobert_backup_*.json
+dagobert_gesamtbackup_*.json
+

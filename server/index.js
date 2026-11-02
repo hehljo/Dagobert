@@ -273,8 +273,8 @@ app.post('/api/transactions/batch', bodyProfileAccess, (req, res) => {
 
     const now = new Date().toISOString();
     for (const t of transactions) {
-      // Priority 1: If an identical booked transaction already exists, skip it!
-      if (bookedHashes.has(t.sourceHash)) {
+      // Priority 1: If an identical booked transaction already exists, or an identical pending item, skip it!
+      if (bookedHashes.has(t.sourceHash) || (t.status === 'pending' && existingHashes.has(t.sourceHash))) {
         skippedDuplicates++;
         continue;
       }
@@ -658,6 +658,29 @@ app.post('/api/backup/import', bodyProfileAccess, (req, res) => {
         const chkBal = a.checkpointBalance !== undefined ? a.checkpointBalance : (a.checkpoint_balance !== undefined ? a.checkpoint_balance : null);
         const chkDate = a.checkpointDate || a.checkpoint_date || null;
         upsertAcc.run(a.id || 'comdirect', profileId, a.name || 'Girokonto', a.iban || null, initBal, initDate, chkBal, chkDate);
+      }
+    }
+
+    // 5. Bank Templates: replace only if present in payload
+    if (Array.isArray(data.bankTemplates) && data.bankTemplates.length > 0) {
+      db.prepare('DELETE FROM bank_templates WHERE profile_id = ?').run(profileId);
+      const insertTemplate = db.prepare(`
+        INSERT INTO bank_templates (id, profile_id, name, description, encoding, delimiter, header_identifier, columns, text_parser, date_format)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const bt of data.bankTemplates) {
+        insertTemplate.run(
+          bt.id,
+          profileId,
+          bt.name,
+          bt.description || '',
+          bt.encoding || 'windows-1252',
+          bt.delimiter || ';',
+          bt.headerIdentifier || bt.header_identifier || 'Buchungstag',
+          typeof bt.columns === 'string' ? bt.columns : JSON.stringify(bt.columns || {}),
+          bt.textParser || bt.text_parser || 'comdirect',
+          bt.dateFormat || bt.date_format || 'DD.MM.YYYY'
+        );
       }
     }
   });
