@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "vitest run src/tests && node --test tests/*.test.mjs",
+    "cap:sync": "npm run build && npx cap sync ios",
+    "postinstall": "node scripts/spm-fork.mjs",
+    "capacitor:sync:after": "node scripts/spm-fork.mjs",
+    "capacitor:update:after": "node scripts/spm-fork.mjs",
+    "test": "vitest run src/tests && node --test tests/*.test.mjs && node scripts/test-spm-fork.mjs",
     "test:ui": "npm run build && node scripts/test-browser.mjs",
     "test:quality": "python3 scripts/check-quality.py",
     "preview": "vite preview"

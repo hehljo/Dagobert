@@ -101,17 +101,18 @@ Das unifizierte Backup-Schema (`src/data/backupSchema.ts`) garantiert verlustfre
    ```bash
    git clone https://github.com/hehljo/Dagobert.git
    cd Dagobert
-   npm install
-   npm run build
-   npx cap sync ios
+   npm ci
+   npm run cap:sync
    ```
 
 2. **Xcode-Projekt öffnen:**
    ```bash
    npx cap open ios
-   # oder manuell:
-   open ios/App/App.xcworkspace
+   # oder direkt:
+   open ios/App/App.xcodeproj
    ```
+   > **Hinweis zu `Missing package product 'CapApp-SPM'`:**
+   > SwiftPM löst Abhängigkeiten beim Öffnen von Xcode vor dem Build auf. Wenn `npm ci` vor dem Öffnen nicht gelaufen ist, fehlen die lokalen Plugins in `node_modules`. Nach dem `npm ci` im Xcode-Menü *File → Packages → Reset Package Caches* und *Product → Clean Build Folder (Cmd+Shift+K)* ausführen.
 
 3. **Signing & Capabilities einrichten:**
    - Klicke im linken Projekt-Navigator auf das blaue Projekt-Icon `App`.
