@@ -1,3 +1,5 @@
+import { Capacitor } from '@capacitor/core';
+
 export interface PlatformCapabilities {
   isNative: boolean;
   isIOS: boolean;
@@ -8,16 +10,16 @@ export interface PlatformCapabilities {
 }
 
 export function detectPlatform(): PlatformCapabilities {
-  const isCapacitor = typeof window !== 'undefined' && !!(window as any).Capacitor?.isNativePlatform?.();
-  const platform = isCapacitor ? (window as any).Capacitor.getPlatform() : 'web';
+  const isNative = typeof window !== 'undefined' && Capacitor.isNativePlatform();
+  const platform = typeof window !== 'undefined' ? Capacitor.getPlatform() : 'web';
   const isIOS = platform === 'ios';
 
   return {
-    isNative: isCapacitor,
+    isNative,
     isIOS,
     hasCloudKit: isIOS,
     hasBiometrics: isIOS,
-    hasNativeFilesystem: isCapacitor,
+    hasNativeFilesystem: isNative,
     hasShareSheet: typeof navigator !== 'undefined' && !!navigator.share
   };
 }
