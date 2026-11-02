@@ -196,7 +196,9 @@ public final class CloudKitSyncManager: NSObject {
                 // Apply remote record to local database idempotently
                 _ = record
             case .failure(let error):
+                #if DEBUG
                 print("CloudKit fetch change record error: \(error)")
+                #endif
             }
         }
 
@@ -215,12 +217,13 @@ public final class CloudKitSyncManager: NSObject {
         fetchOp.recordZoneFetchResultBlock = { zoneID, result in
             switch result {
             case .success(let (serverChangeToken, _, _)):
-                if let sct = serverChangeToken,
-                   let data = try? NSKeyedArchiver.archivedData(withRootObject: sct, requiringSecureCoding: true) {
+                if let data = try? NSKeyedArchiver.archivedData(withRootObject: serverChangeToken, requiringSecureCoding: true) {
                     DagobertDatabase.shared.setSyncState(key: "ck_server_change_token", value: data.base64EncodedString())
                 }
             case .failure(let error):
+                #if DEBUG
                 print("CloudKit recordZoneFetchResultBlock error: \(error)")
+                #endif
             }
         }
 
@@ -255,6 +258,7 @@ public final class CloudKitSyncManager: NSObject {
             case .noAccount: accountStatusStr = "noAccount"
             case .restricted: accountStatusStr = "restricted"
             case .couldNotDetermine: accountStatusStr = "couldNotDetermine"
+            case .temporarilyUnavailable: accountStatusStr = "temporarilyUnavailable"
             @unknown default: accountStatusStr = "couldNotDetermine"
             }
 

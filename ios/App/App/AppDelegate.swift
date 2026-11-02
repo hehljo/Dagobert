@@ -40,7 +40,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
         // Process silent CloudKit notifications
-        let dict = userInfo as! [String: NSObject]
+        guard let dict = userInfo as? [String: NSObject] else {
+            completionHandler(.noData)
+            return
+        }
         let notification = CKNotification(fromRemoteNotificationDictionary: dict)
         if notification?.notificationType == .recordZone {
             CloudKitSyncManager.shared.performSync { success, _ in

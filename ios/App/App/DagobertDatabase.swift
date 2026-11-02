@@ -55,7 +55,9 @@ public final class DagobertDatabase {
         if sqlite3_exec(db, sql, nil, nil, &errorMsg) != SQLITE_OK {
             let msg = errorMsg != nil ? String(cString: errorMsg!) : "Unbekannter Fehler"
             sqlite3_free(errorMsg)
+            #if DEBUG
             print("SQLite EXEC Fehler bei [\(sql)]: \(msg)")
+            #endif
         }
     }
 
