@@ -1,4 +1,6 @@
 node_modules
+data/.comdirect-access-key
+data/comdirect-access/
 dist
 dist-ssr
 *.local
@@ -38,3 +40,21 @@ data/*.db-shm
 dagobert_backup_*.json
 dagobert_gesamtbackup_*.json
 
+
+# Local secrets and additional SQLite sidecars
+.env
+.env.*
+!.env.example
+*.p8
+*.sqlite3-wal
+*.sqlite3-shm
+*.ipa
+*.xcarchive/
+
+# Python test/runner bytecode (preserve existing cache files locally)
+__pycache__/
+*.pyc
+
+# Interne Notizen (öffentliches Repo)
+HANDOVER.md
+MASTER_ROADMAP.md

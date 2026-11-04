@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { startTestServer, request } from './helpers/server.mjs';
 import { validateBackupPayload, normalizeBackupPayload, roundToCents } from '../src/data/backupSchema.ts';
 
-test('Bidirektionaler Round-Trip: Docker -> iOS -> Docker & Schema-Konsistenz', async (t) => {
+test('Bidirektionaler Round-Trip: Docker -> JSON-Vertrag -> Docker & Schema-Konsistenz', async (t) => {
   const serverA = await startTestServer();
   const serverB = await startTestServer();
 
@@ -126,7 +126,7 @@ test('Bidirektionaler Round-Trip: Docker -> iOS -> Docker & Schema-Konsistenz', 
   // Schritt 2: Normalisierung in kanonisches iOS Format
   const iosPayload = normalizeBackupPayload(dockerExport, profileId);
   assert.equal(iosPayload.format, 'dagobert_backup');
-  assert.equal(iosPayload.schemaVersion, 1);
+  assert.equal(iosPayload.schemaVersion, 2);
   assert.equal(iosPayload.transactions.length, 3);
 
   // Prüfe Betragspräzision in Cents (kein Fließkomma-Drift)
@@ -219,6 +219,6 @@ test('Bidirektionaler Round-Trip: Docker -> iOS -> Docker & Schema-Konsistenz', 
   assert.equal(legacyVal.valid, true, 'Alte Backups müssen valide bleiben');
   const legacyNorm = normalizeBackupPayload(legacyBackup);
   assert.equal(legacyNorm.format, 'dagobert_backup');
-  assert.equal(legacyNorm.schemaVersion, 1);
+  assert.equal(legacyNorm.schemaVersion, 2);
   assert.equal(legacyNorm.transactions[0].amount, -25.50);
 });

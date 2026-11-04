@@ -1,111 +1,71 @@
 import Foundation
 import LocalAuthentication
-import Security
-import CommonCrypto
 
-public final class SecurityManager {
-    public static let shared = SecurityManager()
-
-    private let keychainService = "de.dagobert.app.keychain"
-
+final class SecurityManager: @unchecked Sendable {
+    static let shared = SecurityManager()
+    private let lock = NSLock()
+    private var unlocked = false
+    private var generation = 0
+    private var authenticationCount = 0
+    var appUnlocked: Bool {
+        lock.lock(); defer { lock.unlock() }; return unlocked
+    }
+    var authenticationInProgress: Bool {
+        lock.lock(); defer { lock.unlock() }; return authenticationCount > 0
+    }
     private init() {}
-
-    // MARK: - SHA-256 PIN Hashing
-
-    public func hashPin(_ pin: String) -> String {
-        let trimmed = pin.trimmingCharacters(in: .whitespacesAndNewlines)
-        let salted = trimmed + "_dagobert_salt"
-        guard let data = salted.data(using: .utf8) else { return "" }
-
-        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-        data.withUnsafeBytes {
-            _ = CC_SHA256($0.baseAddress, CC_LONG(data.count), &hash)
-        }
-        return hash.map { String(format: "%02x", $0) }.joined()
-    }
-
-    // MARK: - Biometrics & LocalAuthentication
-
-    public func canUseBiometrics() -> Bool {
-        let context = LAContext()
-        var error: NSError?
-        return context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
-    }
-
-    public func authenticateWithDevice(reason: String, completion: @escaping (Bool, String?) -> Void) {
-        let context = LAContext()
-        context.localizedCancelTitle = "Abbrechen"
-
-        var error: NSError?
-        let policy: LAPolicy = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
-            ? .deviceOwnerAuthenticationWithBiometrics
-            : .deviceOwnerAuthentication
-
-        context.evaluatePolicy(policy, localizedReason: reason) { success, evalError in
-            DispatchQueue.main.async {
-                if success {
-                    completion(true, nil)
-                } else {
-                    let errMsg = evalError?.localizedDescription ?? "Authentifizierung fehlgeschlagen"
-                    completion(false, errMsg)
-                }
+    enum SecurityError: LocalizedError {
+        case locked, unavailable, mandatory, profilePinUnavailable
+        var errorDescription: String? {
+            switch self {
+            case .locked: return "Bitte Dagobert mit Face ID, Touch ID oder dem Gerätecode entsperren."
+            case .unavailable: return "Richte in den Geräte-Einstellungen einen Gerätecode ein, damit Dagobert deine Finanzdaten schützen kann."
+            case .mandatory: return "Die Gerätesperre schützt die gesamte App und kann nicht deaktiviert werden."
+            case .profilePinUnavailable: return "Auf diesem Gerät schützt die App-Sperre alle Profile. Eine zusätzliche Profil-PIN ist nicht vorgesehen."
             }
         }
     }
-
-    // MARK: - Keychain Storage
-
-    public func saveKeychainItem(key: String, value: String) -> Bool {
-        guard let valueData = value.data(using: .utf8) else { return false }
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: key
-        ]
-
-        let updateFields: [String: Any] = [
-            kSecValueData as String: valueData,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        ]
-
-        let status = SecItemUpdate(query as CFDictionary, updateFields as CFDictionary)
-        if status == errSecSuccess {
-            return true
-        } else if status == errSecItemNotFound {
-            var newQuery = query
-            newQuery[kSecValueData as String] = valueData
-            newQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            let addStatus = SecItemAdd(newQuery as CFDictionary, nil)
-            return addStatus == errSecSuccess
-        }
+    func appLockEnabled() throws -> Bool { true }
+    func requireAppAccess() throws {
+        guard appUnlocked else { throw SecurityError.locked }
+    }
+    func lockApp() {
+        lock.lock(); defer { lock.unlock() }
+        unlocked = false
+        generation += 1
+    }
+    func setAppLock(_ enabled: Bool) async throws {
+        guard enabled else { throw SecurityError.mandatory }
+        try requireAppAccess()
+    }
+    func canAuthenticate() -> Bool {
+        LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
+    }
+    private func beginAuthentication() -> Int {
+        lock.lock(); defer { lock.unlock() }; authenticationCount += 1; return generation
+    }
+    private func endAuthentication(_ token: Int, success: Bool) -> Bool {
+        lock.lock(); defer { lock.unlock() }; authenticationCount -= 1
+        if success && token == generation { unlocked = true; return true }
         return false
     }
-
-    public func getKeychainItem(key: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: key,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        if status == errSecSuccess, let data = item as? Data {
-            return String(data: data, encoding: .utf8)
-        }
-        return nil
+    func authenticate(reason: String) async throws -> Bool {
+        let context = LAContext()
+        context.localizedCancelTitle = "Abbrechen"
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) else { throw SecurityError.unavailable }
+        let token = beginAuthentication()
+        do {
+            let success = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
+            return endAuthentication(token, success: success)
+        } catch { _ = endAuthentication(token, success: false); throw error }
     }
-
-    public func deleteKeychainItem(key: String) -> Bool {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: key
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-        return status == errSecSuccess || status == errSecItemNotFound
+    func requireProfile(_ id: String, database: DagobertDatabase) throws {
+        try requireAppAccess()
+        try database.requireProfile(id)
+        // Legacy PIN hashes remain stored for compatibility; the app lock grants profile access.
+    }
+    func unlockProfile(_ id: String, pin: String, database: DagobertDatabase) throws -> Bool {
+        try requireProfile(id, database: database)
+        return true
     }
 }

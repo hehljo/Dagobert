@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, CalendarDays, ChevronRight, Filter, TrendingDown, TrendingUp, Wallet, X } from 'lucide-react';
-import type { Category, Transaction } from '../types/index.ts';
+import type { Account, Category, Transaction } from '../types/index.ts';
+import { monthEndBalances } from '../lib/db.ts';
+import { BalanceHistory } from './BalanceHistory.tsx';
 import { calculateStatistics, getStatisticsYears } from '../lib/statistics.ts';
 import { CategoryIcon } from './CategoryIcon.tsx';
 import { DonutChart } from './DonutChart.tsx';
@@ -8,6 +10,7 @@ import { DonutChart } from './DonutChart.tsx';
 interface StatisticsViewProps {
   transactions: Transaction[];
   categories: Category[];
+  account?: Account;
   onSelectTransaction: (transaction: Transaction) => void;
 }
 
@@ -56,7 +59,7 @@ function TransactionRanking({ items, onSelectTransaction, emptyMessage }: {
   );
 }
 
-export function StatisticsView({ transactions, categories, onSelectTransaction }: StatisticsViewProps) {
+export function StatisticsView({ transactions, categories, account, onSelectTransaction }: StatisticsViewProps) {
   const [mode, setMode] = useState<'year' | 'month'>('year');
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth() + 1);
@@ -78,6 +81,9 @@ export function StatisticsView({ transactions, categories, onSelectTransaction }
   const statistics = useMemo(() => calculateStatistics(transactions, categories, {
     year, month: mode === 'month' ? month : undefined,
   }), [transactions, categories, year, month, mode]);
+  // Year view: months of that year (up to today); month view: twelve months ending at the chosen month.
+  const balanceHistory = useMemo(() => monthEndBalances(account, transactions,
+    `${year}-${String(mode === 'year' ? 12 : month).padStart(2, '0')}`, 12), [account, transactions, year, month, mode]);
   const ranking = direction === 'expense' ? statistics.expenseCategories : statistics.incomeCategories;
   const selectedCategory = ranking.find(category => category.id === selectedCategoryId);
   const categoryLabel = direction === 'expense' ? 'Ausgaben' : 'Einnahmen';
@@ -103,7 +109,7 @@ export function StatisticsView({ transactions, categories, onSelectTransaction }
           <BarChart3 aria-hidden="true" className="w-6 h-6 shrink-0 text-ios-tint" />
           <div className="min-w-0">
             <h1 id="statistics-title" className="text-lg font-bold">Statistik</h1>
-            <p className={`mt-1 text-sm ${secondary}`}>Einnahmen, Ausgaben und Kategorien im Überblick.</p>
+            <p className={`mt-1 text-sm ${secondary}`}>Einnahmen, Ausgaben und Kategorien nach Buchungsdatum.</p>
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -286,6 +292,8 @@ export function StatisticsView({ transactions, categories, onSelectTransaction }
           </>}
         </div>
       </section>
+
+      <BalanceHistory points={balanceHistory} className={card} />
 
       <section className={card} aria-labelledby="statistics-top-title">
         <h2 id="statistics-top-title" className="font-bold">Top 10 Ausgaben · {periodLabel}</h2>

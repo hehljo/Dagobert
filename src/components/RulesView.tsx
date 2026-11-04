@@ -4,6 +4,7 @@ import type { CategoryRule, Category, Transaction, RuleCondition } from '../type
 import { evaluateRules, matchesCondition } from '../lib/rulesEngine.ts';
 import { createCategoryRule, deleteCategoryRuleScoped, loadStandardCategoryRules, updateExistingTransaction } from '../lib/api.ts';
 import { CategoryIcon } from './CategoryIcon.tsx';
+import { RulesTransfer } from './RulesTransfer.tsx';
 
 interface RulesViewProps {
   profileId?: string;
@@ -238,6 +239,7 @@ export const RulesView: React.FC<RulesViewProps> = ({ profileId = 'privat', rule
 
   return (
     <div className="space-y-5 pb-24 max-w-5xl mx-auto px-4 pt-4">
+      <RulesTransfer key={profileId} profileId={profileId} onImported={onRulesUpdated} />
       {/* Header card */}
       <div className="glass-surface p-5 rounded-3xl shadow-sm border border-ios-separator dark:border-ios-darkSeparator flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>

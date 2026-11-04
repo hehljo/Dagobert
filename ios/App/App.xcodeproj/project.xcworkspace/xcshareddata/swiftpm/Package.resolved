@@ -1,13 +1,15 @@
 {
-  "pins" : [
+  "originHash": "dcae9c27523f06b491895d532042ecb1a9e022063828d12847250077149d4baa",
+  "pins": [
     {
-      "identity" : "capacitor-swift-pm",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/hehljo/capacitor-swift-pm.git",
-      "state" : {
-        "version" : "8.6.0"
+      "identity": "capacitor-swift-pm",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/hehljo/capacitor-swift-pm.git",
+      "state": {
+        "revision": "e9e932f7748d3b948bc47f5791c761ac5221ec6a",
+        "version": "8.6.0"
       }
     }
   ],
-  "version" : 2
+  "version": 3
 }

@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D9B013022FE993A70072D410 /* BankAccessStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9B013012FE993A50072D410 /* BankAccessStore.swift */; };
+		D9B012022FE993A70072D410 /* ComdirectSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9B012012FE993A50072D410 /* ComdirectSession.swift */; };
+        D9B011022FE993A70072D410 /* SimulatorBiometrics.m in Sources */ = {isa = PBXBuildFile; fileRef = D9B011012FE993A50072D410; };
+		D9B010022FE993A70072D410 /* OfflineAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9B010012FE993A50072D410 /* OfflineAppTests.swift */; };
+		D9B008022FE993A70072D4E8 /* DocumentInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9B008012FE993A50072D4E8 /* DocumentInbox.swift */; };
 		D9B007022FE993A70072D4E7 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D9B007012FE993A50072D4E7 /* PrivacyInfo.xcprivacy */; };
 		D9B001022FE993A70072D4E1 /* DagobertDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9B001012FE993A50072D4E1 /* DagobertDatabase.swift */; };
 		D9B002022FE993A70072D4E2 /* CloudKitSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9B002012FE993A50072D4E2 /* CloudKitSyncManager.swift */; };
@@ -25,6 +30,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		D9B013012FE993A50072D410 /* BankAccessStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BankAccessStore.swift; sourceTree = "<group>"; };
+		D9B012012FE993A50072D410 /* ComdirectSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComdirectSession.swift; sourceTree = "<group>"; };
+        D9B011012FE993A50072D410 = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = SimulatorBiometrics.m; sourceTree = "<group>"; };
+        D9B011032FE993A50072D410 = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SimulatorBiometrics.h; sourceTree = "<group>"; };
+		D9B010012FE993A50072D410 /* OfflineAppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineAppTests.swift; sourceTree = "<group>"; };
+		D9B010032FE993A50072D410 /* DagobertUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DagobertUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D9B008012FE993A50072D4E8 /* DocumentInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentInbox.swift; sourceTree = "<group>"; };
 		D9B007012FE993A50072D4E7 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		D9B001012FE993A50072D4E1 /* DagobertDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DagobertDatabase.swift; sourceTree = "<group>"; };
 		D9B002012FE993A50072D4E2 /* CloudKitSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitSyncManager.swift; sourceTree = "<group>"; };
@@ -46,6 +58,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		D9B010042FE993A50072D410 /* Test Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		504EC3011FED79650016851F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -57,11 +70,13 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+        D9B010052FE993A50072D410 /* DagobertUITests */ = {isa = PBXGroup; children = (D9B010012FE993A50072D410 /* OfflineAppTests.swift */, D9B011012FE993A50072D410, D9B011032FE993A50072D410,); path = DagobertUITests; sourceTree = "<group>"; };
 		504EC2FB1FED79650016851F = {
 			isa = PBXGroup;
 			children = (
 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
 				504EC3061FED79650016851F /* App */,
+				D9B010052FE993A50072D410 /* DagobertUITests */,
 				504EC3051FED79650016851F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -70,6 +85,7 @@
 			isa = PBXGroup;
 			children = (
 				504EC3041FED79650016851F /* App.app */,
+				D9B010032FE993A50072D410 /* DagobertUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -79,6 +95,9 @@
 			children = (
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
 				D9B001012FE993A50072D4E1 /* DagobertDatabase.swift */,
+				D9B008012FE993A50072D4E8 /* DocumentInbox.swift */,
+				D9B012012FE993A50072D410 /* ComdirectSession.swift */,
+				D9B013012FE993A50072D410 /* BankAccessStore.swift */,
 				D9B002012FE993A50072D4E2 /* CloudKitSyncManager.swift */,
 				D9B003012FE993A50072D4E3 /* SecurityManager.swift */,
 				D9B004012FE993A50072D4E4 /* DagobertPlugin.swift */,
@@ -100,6 +119,17 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		D9B010062FE993A50072D410 /* DagobertUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D9B010092FE993A50072D410;
+			buildPhases = (D9B010072FE993A50072D410, D9B010042FE993A50072D410, D9B010082FE993A50072D410,);
+			buildRules = ();
+			dependencies = (D9B0100C2FE993A50072D410,);
+			name = DagobertUITests;
+			productName = DagobertUITests;
+			productReference = D9B010032FE993A50072D410;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		504EC3031FED79650016851F /* App */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 504EC3161FED79650016851F /* Build configuration list for PBXNativeTarget "App" */;
@@ -129,6 +159,7 @@
 				LastSwiftUpdateCheck = 0920;
 				LastUpgradeCheck = 0920;
 				TargetAttributes = {
+					D9B010062FE993A50072D410 = {CreatedOnToolsVersion = 27.0; TestTargetID = 504EC3031FED79650016851F; };
 					504EC3031FED79650016851F = {
 						CreatedOnToolsVersion = 9.2;
 						LastSwiftMigration = 1100;
@@ -153,11 +184,13 @@
 			projectRoot = "";
 			targets = (
 				504EC3031FED79650016851F /* App */,
+				D9B010062FE993A50072D410 /* DagobertUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		D9B010082FE993A50072D410 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		504EC3021FED79650016851F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -175,6 +208,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+        D9B010072FE993A50072D410 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (D9B010022FE993A70072D410 /* OfflineAppTests.swift in Sources */, D9B011022FE993A70072D410,); runOnlyForDeploymentPostprocessing = 0; };
 		504EC3001FED79650016851F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -182,6 +216,9 @@
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 				D9B001022FE993A70072D4E1 /* DagobertDatabase.swift in Sources */,
+				D9B008022FE993A70072D4E8 /* DocumentInbox.swift in Sources */,
+				D9B012022FE993A70072D410 /* ComdirectSession.swift in Sources */,
+				D9B013022FE993A70072D410 /* BankAccessStore.swift in Sources */,
 				D9B002022FE993A70072D4E2 /* CloudKitSyncManager.swift in Sources */,
 				D9B003022FE993A70072D4E3 /* SecurityManager.swift in Sources */,
 				D9B004022FE993A70072D4E4 /* DagobertPlugin.swift in Sources */,
@@ -190,6 +227,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXContainerItemProxy section */
+		D9B0100D2FE993A50072D410 = {isa = PBXContainerItemProxy; containerPortal = 504EC2FC1FED79650016851F; proxyType = 1; remoteGlobalIDString = 504EC3031FED79650016851F; remoteInfo = App; };
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		D9B0100C2FE993A50072D410 = {isa = PBXTargetDependency; target = 504EC3031FED79650016851F; targetProxy = D9B0100D2FE993A50072D410; };
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		504EC30B1FED79650016851F /* Main.storyboard */ = {
@@ -211,6 +256,16 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		D9B0100A2FE993A50072D410 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = de.lupfa.dagobert.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = App; SWIFT_OBJC_BRIDGING_HEADER = "DagobertUITests/SimulatorBiometrics.h"; CODE_SIGN_STYLE = Automatic; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; };
+			name = Debug;
+		};
+		D9B0100B2FE993A50072D410 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = de.lupfa.dagobert.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = App; SWIFT_OBJC_BRIDGING_HEADER = "DagobertUITests/SimulatorBiometrics.h"; CODE_SIGN_STYLE = Automatic; };
+			name = Release;
+		};
 		504EC3141FED79650016851F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
@@ -260,7 +315,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
@@ -311,7 +366,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -324,19 +379,20 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
 			buildSettings = {
+				APS_ENVIRONMENT = development;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
-				PRODUCT_BUNDLE_IDENTIFIER = de.dagobert.app;
+				PRODUCT_BUNDLE_IDENTIFIER = de.lupfa.dagobert;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_VERSION = 5.0;
@@ -347,18 +403,19 @@
 		504EC3181FED79650016851F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APS_ENVIRONMENT = production;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = App/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = de.dagobert.app;
+				PRODUCT_BUNDLE_IDENTIFIER = de.lupfa.dagobert;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
 				SWIFT_VERSION = 5.0;
@@ -369,6 +426,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		D9B010092FE993A50072D410 = {isa = XCConfigurationList; buildConfigurations = (D9B0100A2FE993A50072D410, D9B0100B2FE993A50072D410,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		504EC2FF1FED79650016851F /* Build configuration list for PBXProject "App" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

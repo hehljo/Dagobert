@@ -81,4 +81,11 @@ describe('Statistics', () => {
     expect(result.expenseCategories.every(c => c.share === 0)).toBe(true);
     expect(getStatisticsYears([transaction(-1, '2023-01-01'), transaction(-1, '2025-01-01'), transaction(-1, '2025-02-30')], 2025)).toEqual([2025, 2023]);
   });
+
+  it('orders tied native string and Docker integer IDs consistently regardless of input order', () => {
+    const input = [2, 10, 'uuid-b', 'uuid-a'].map(id => transaction(-10, '2026-11-01', { id }));
+    const expected = ['uuid-b', 'uuid-a', 10, 2];
+    expect(largestTransactions(input).map(t => t.id)).toEqual(expected);
+    expect(largestTransactions([...input].reverse()).map(t => t.id)).toEqual(expected);
+  });
 });

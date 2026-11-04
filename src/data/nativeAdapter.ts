@@ -6,8 +6,13 @@ import type {
   BackupPayload,
   BackupValidationResult,
   BackupImportMode,
+  SyncConflict,
+  RecoveryBackup,
   CloudKitSyncStatus
 } from './interfaces.ts';
+import type { IncomingDocument } from './interfaces.ts';
+import type { PluginListenerHandle } from '@capacitor/core';
+import { planRulesImport, type RulesPackage, type RulesImportResult } from './rulesPackage.ts';
 import type {
   Profile,
   Account,
@@ -19,9 +24,16 @@ import type {
 } from '../types/index.ts';
 import { validateBackupPayload, normalizeBackupPayload, CURRENT_BACKUP_SCHEMA_VERSION, BACKUP_FORMAT_IDENTIFIER } from './backupSchema.ts';
 import standardRules from '../lib/standardRules.json';
+import { PROFILE_DEFAULTS } from './defaults.ts';
+import { ProfileLockedError } from './webAdapter.ts';
 
 interface DagobertNativePluginInterface {
-  getProfiles(): Promise<{ profiles: Profile[] }>;
+  importRulesPackage(options: { profileId: string; categories: Category[]; rules: CategoryRule[]; expectedCategories: Category[]; expectedRules: CategoryRule[] }): Promise<{ categoriesAdded: number; rulesAdded: number }>;
+  getIncomingDocuments(): Promise<{ documents: IncomingDocument[] }>;
+  readIncomingDocument(options: { id: string }): Promise<IncomingDocument & { base64: string }>;
+  acknowledgeIncomingDocument(options: { id: string }): Promise<{ success: boolean }>;
+  addListener(event: 'documentInboxChanged', listener: () => void): Promise<PluginListenerHandle>;
+  getProfiles(options: { defaults: typeof PROFILE_DEFAULTS }): Promise<{ profiles: Profile[] }>;
   createProfile(options: { name: string; icon?: string; color?: string; pin?: string }): Promise<Profile>;
   updateProfile(options: { profileId: string; name?: string; icon?: string; color?: string; pin?: string; removePin?: boolean }): Promise<{ success: boolean; hasPin: boolean }>;
   deleteProfile(options: { profileId: string }): Promise<{ success: boolean }>;
@@ -70,6 +82,14 @@ interface DagobertNativePluginInterface {
   setSyncEnabled(options: { enabled: boolean }): Promise<{ enabled: boolean }>;
   triggerSync(): Promise<{ success: boolean }>;
 
+  getDeviceSecurity(): Promise<{ enabled: boolean }>;
+  getAppLockState(): Promise<{ unlocked: boolean }>;
+  setAppLockEnabled(options: { enabled: boolean }): Promise<{ enabled: boolean }>;
+  shareBackup(options: { json: string; kind?: 'rules' }): Promise<{ completed: boolean }>;
+  getConflicts(): Promise<{ conflicts: SyncConflict[] }>;
+  resolveConflict(options: { id: string; version: number }): Promise<{ success: boolean }>;
+  getRecoveryBackups(): Promise<{ backups: RecoveryBackup[] }>;
+  exportRecoveryBackup(options: { id: string }): Promise<{ backup: BackupPayload }>;
   canUseBiometrics(): Promise<{ available: boolean }>;
   authenticateBiometrics(options?: { reason?: string }): Promise<{ success: boolean }>;
 }
@@ -77,8 +97,25 @@ interface DagobertNativePluginInterface {
 export const DagobertNativePlugin = registerPlugin<DagobertNativePluginInterface>('DagobertPlugin');
 
 export class NativeDagobertRepository implements IDagobertRepository {
+  async importRulesPackage(profileId: string, payload: RulesPackage): Promise<RulesImportResult> {
+    const current = await this.getProfileData(profileId);
+    const plan = planRulesImport(payload, current.categories, current.rules);
+    const added = await DagobertNativePlugin.importRulesPackage({ profileId, categories: plan.categories, rules: plan.rules,
+      expectedCategories: current.categories, expectedRules: current.rules });
+    return { ...added, unchanged: plan.unchanged };
+  }
+  async shareRulesPackage(payload: RulesPackage): Promise<void> {
+    await DagobertNativePlugin.shareBackup({ json: JSON.stringify(payload, null, 2), kind: 'rules' });
+  }
+  async getIncomingDocuments(): Promise<IncomingDocument[]> { return (await DagobertNativePlugin.getIncomingDocuments()).documents; }
+  async readIncomingDocument(id: string): Promise<IncomingDocument & { base64: string }> { return DagobertNativePlugin.readIncomingDocument({ id }); }
+  async acknowledgeIncomingDocument(id: string): Promise<void> { await DagobertNativePlugin.acknowledgeIncomingDocument({ id }); }
+  async onIncomingDocumentsChanged(listener: () => void): Promise<() => void> {
+    const handle = await DagobertNativePlugin.addListener('documentInboxChanged', listener);
+    return () => { void handle.remove(); };
+  }
   async getProfiles(): Promise<Profile[]> {
-    const res = await DagobertNativePlugin.getProfiles();
+    const res = await DagobertNativePlugin.getProfiles({ defaults: PROFILE_DEFAULTS });
     return res.profiles;
   }
 
@@ -110,7 +147,11 @@ export class NativeDagobertRepository implements IDagobertRepository {
     transactions: Transaction[];
     bankTemplates: BankTemplate[];
   }> {
-    return DagobertNativePlugin.getProfileData({ profileId });
+    try { return await DagobertNativePlugin.getProfileData({ profileId }); }
+    catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'PROFILE_LOCKED') throw new ProfileLockedError();
+      throw error;
+    }
   }
 
   async batchImportTransactions(
@@ -182,7 +223,7 @@ export class NativeDagobertRepository implements IDagobertRepository {
 
   async exportBackup(profileId: string, includeAllProfiles = false): Promise<BackupPayload> {
     const res = await DagobertNativePlugin.exportBackup({ profileId, includeAllProfiles });
-    const normalized = normalizeBackupPayload(res.backup, profileId);
+    const normalized = normalizeBackupPayload(res.backup);
     normalized.format = BACKUP_FORMAT_IDENTIFIER;
     normalized.schemaVersion = CURRENT_BACKUP_SCHEMA_VERSION;
     normalized.sourcePlatform = 'ios';
@@ -194,7 +235,7 @@ export class NativeDagobertRepository implements IDagobertRepository {
   }
 
   async importBackup(profileId: string, payload: BackupPayload, mode: BackupImportMode = 'replace'): Promise<void> {
-    const normalized = normalizeBackupPayload(payload, profileId);
+    const normalized = normalizeBackupPayload(payload);
     await DagobertNativePlugin.importBackup({ profileId, data: normalized, mode });
   }
 
@@ -213,6 +254,15 @@ export class NativeDagobertRepository implements IDagobertRepository {
   async triggerSync(): Promise<void> {
     await DagobertNativePlugin.triggerSync();
   }
+
+  async getDeviceSecurity(): Promise<{ enabled: boolean }> { return DagobertNativePlugin.getDeviceSecurity(); }
+  async getAppLockState(): Promise<{ unlocked: boolean }> { return DagobertNativePlugin.getAppLockState(); }
+  async setAppLockEnabled(enabled: boolean): Promise<void> { await DagobertNativePlugin.setAppLockEnabled({ enabled }); }
+  async shareBackup(payload: BackupPayload): Promise<void> { await DagobertNativePlugin.shareBackup({ json: JSON.stringify(payload, null, 2) }); }
+  async getConflicts(): Promise<SyncConflict[]> { return (await DagobertNativePlugin.getConflicts()).conflicts; }
+  async resolveConflict(id: string, version: number): Promise<void> { await DagobertNativePlugin.resolveConflict({ id, version }); }
+  async getRecoveryBackups(): Promise<RecoveryBackup[]> { return (await DagobertNativePlugin.getRecoveryBackups()).backups; }
+  async exportRecoveryBackup(id: string): Promise<BackupPayload> { return normalizeBackupPayload((await DagobertNativePlugin.exportRecoveryBackup({ id })).backup); }
 
   async canUseBiometrics(): Promise<boolean> {
     const res = await DagobertNativePlugin.canUseBiometrics();

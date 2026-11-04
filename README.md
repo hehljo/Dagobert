@@ -5,90 +5,107 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.9.0-blue.svg?style=flat-square" alt="Version">
-  <img src="https://img.shields.io/badge/Node-22%2B-green.svg?style=flat-square&logo=node.js" alt="Node">
+  <img src="https://img.shields.io/badge/Docker-Ready-2496ED.svg?style=flat-square&logo=docker" alt="Docker">
+  <img src="https://img.shields.io/badge/iOS-in%20Entwicklung-black.svg?style=flat-square&logo=apple" alt="iOS-App in Entwicklung">
   <img src="https://img.shields.io/badge/React-19-blue.svg?style=flat-square&logo=react" alt="React">
   <img src="https://img.shields.io/badge/TypeScript-5.7-blue.svg?style=flat-square&logo=typescript" alt="TypeScript">
-  <img src="https://img.shields.io/badge/Tests-80%20passed-success.svg?style=flat-square" alt="Tests">
-  <img src="https://img.shields.io/badge/Docker-Ready-2496ED.svg?style=flat-square&logo=docker" alt="Docker">
-  <img src="https://img.shields.io/badge/Privacy-100%25%20Local--First-emerald.svg?style=flat-square" alt="Privacy">
+  <img src="https://img.shields.io/badge/SQLite-local-003B57.svg?style=flat-square&logo=sqlite" alt="SQLite">
+  <img src="https://img.shields.io/badge/Privacy-Local--First-emerald.svg?style=flat-square" alt="Privacy">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-purple.svg?style=flat-square" alt="License"></a>
-  <a href="https://buymeacoffee.com/pommesbude" target="_blank"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support%20Development-FFDD00?style=flat-square&logo=buymeacoffee&logoColor=black" alt="Buy Me A Coffee"></a>
+  <a href="https://buymeacoffee.com/pommesbude" target="_blank"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-FFDD00?style=flat-square&logo=buymeacoffee&logoColor=black" alt="Buy Me A Coffee"></a>
 </p>
 
 <p align="center">
-  <b>Schlankes, selbstgehostetes Finanz- & Haushaltsbuch mit intelligentem CSV-Import, Multi-Profil-Verwaltung und kompromissloser Datensicherheit.</b><br>
-  <i>Keine Cloud. Kein Abo. Kein Ressourcen-Fresser. Entwickelt für Synology DiskStation, Raspberry Pi oder jeden Docker-Host.</i>
+  <b>Schlankes Haushaltsbuch für comdirect-Konten – selbst gehostet im Docker-Container oder bald als iPhone-App.</b><br>
+  <i>CSV-Import und Direktabruf per pushTAN, Regeln, Budgetmonat nach Gehalt, Statistik. Kein Abo, kein Tracking, kein fremder Server.</i>
 </p>
 
 <p align="center">
-  <a href="https://buymeacoffee.com/pommesbude" target="_blank">
-    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="42">
-  </a>
+  <img src="docs/screenshot-dashboard.png" alt="Dagobert Dashboard" width="880" style="border-radius: 16px;">
 </p>
 
-<p align="center">
-  <img src="docs/screenshot-dashboard.png" alt="Dagobert Glassmorphism Dashboard" width="880" style="border-radius: 16px;">
-</p>
+---
+
+## ✨ Neu
+
+- **comdirect-Direktabruf per API:** Umsätze und Kontostand ohne CSV-Umweg abrufen, Freigabe per pushTAN. Mit gespeichertem Zugang ein Tipp auf „Sync“.
+- **iPhone-App in Entwicklung:** dieselbe Oberfläche nativ auf iOS, mit Face ID und optionalem iCloud-Sync. Erscheint im App Store, sobald sie fertig ist.
+- **Budgetmonat „Gehalt bis Gehalt“**, Kontostand am Monatsende und Kontostand-Verlauf in der Statistik.
+- **Sparen & Investieren** wahlweise verrechnet, als Überschuss oder als Umbuchung.
 
 ---
 
 ## 🎯 Warum Dagobert?
 
-Bestehende Self-Hosted-Finanztools (wie *Firefly III* oder *Actual Budget*) sind entweder ressourcenhungrige Container-Monster mit mehreren Hilfsdiensten, erfordern externe Datenbank-Cluster oder scheitern an den typischen Eigenheiten deutscher Bank-Exporte (Umlaut-Salat, comdirect Header-Metadaten, unstrukturierte Buchungstexte).
+Viele Self-Hosted-Finanztools (etwa *Firefly III* oder *Actual Budget*) brauchen mehrere Dienste oder eine externe Datenbank. Mit den Eigenheiten deutscher Bank-Exporte haben sie oft Mühe: kaputte Umlaute, Metadaten-Zeilen im comdirect-Kopf, unstrukturierte Buchungstexte.
 
-**Dagobert geht den minimalistischen Weg:**
-- **Ein einziger schlanker Docker-Container** (unter 25 MB RAM im Leerlauf).
-- **Zentrale SQLite-Datenbank** im Container gemountet – keine Postgres-, MySQL- oder Redis-Container nötig.
-- **Spezialisiert auf deutsche Bankauszüge** (aktuell mit nativem Spezial-Parser für **comdirect**, weitere Banken wie ING, DKB oder Sparkasse auf Anfrage problemlos erweiterbar).
-- **Mobile-First & PWA-tauglich:** Am iPhone/Android im Browser mit nativen Gesten, Bottom-Navigation und OLED Dark Mode bedienbar.
-
----
-
-## 🚀 Kern-Features
-
-### 🔒 Kompromisslose Privatsphäre & Sicherheit
-- **100 % Local-First:** Deine Bankumsätze und Salden bleiben auf deinem eigenen Server. Die App lädt keine Inhalte von Drittanbietern, es gibt kein Tracking und keine Telemetrie.
-- **Globale Server-PIN:** Schützt Profile serverseitig in SQLite mit Brute-Force-Sperre (Rate-Limiting) und 12h-Sitzung. Bevor eine PIN nicht verifiziert ist, liefert die API keinen einzigen Datensatz aus.
-- **Biometrische App-Sperre:** Unterstützt zusätzlich Passkeys (Face ID / Touch ID) sowie lokale Geräte-PINs.
-
-### 💳 Smarter comdirect CSV-Import
-- **Automatischer CP1252-Decoder:** Kein Umlaut-Chaos mehr (`Kartenverf¸gung` ➔ `Kartenverfügung`).
-- **Dynamisches Header-Skipping:** Erkennt die comdirect-Metadatenzeilen am Dateianfang automatisch und startet direkt bei den Buchungen.
-- **Intelligente Textzerlegung:** Trennt automatisiert Auftraggeber/Empfänger, Vorgangsart und Verwendungszweck aus dem unstrukturierten Buchungstext.
-- **Stichtags- & Saldoprüfung:** Erkennt den echten Konto-Saldo laut Auszug und gleicht historische Buchungen lückenlos ab.
-- **Duplikat-Schutz:** Deterministische Prüfsummen verhindern doppelte Buchungen bei sich überschneidenden Monats-Exporten.
-- *Weitere Banken:* Die Parser-Architektur ist modular ausgelegt – weitere deutsche und europäische Institute können auf Wunsch ergänzt werden.
-
-### 🧠 Intelligente Erkennungsregeln (Rules Engine)
-- **Granulare Kriterien:** Filtere gezielt nach *nur Empfänger*, *Verwendungszweck*, *Buchungstext*, *Betrag* oder *Buchungsart* (enthält, ist exakt, Regex).
-- **One-Click Rule Learning:** Beim Kategorisieren einer Buchung schlägt Dagobert direkt vor, eine Regel für die Zukunft anzulegen.
-- **Rückwirkendes Anwenden:** Neue oder bearbeitete Regeln können mit einem Klick rückwirkend auf alle passenden historischen Buchungen angewendet werden.
-- **Standard-Regelwerk:** Enthält vordefinierte Regeln für gängige Händler, Supermärkte, Tankstellen und Abos.
-
-### 👥 Multi-Profil & UX
-- **Echte Profiltrennung:** Verwalte private Finanzen, Geschäftskonto oder Familienbudget sauber getrennt mit individuellen Farben, Icons und PIN-Schutz.
-- **Inline-Kategorien:** Lege neue Kategorien direkt beim Kategorisieren einer Buchung an, ohne das Modal zu verlassen.
-- **Visuelles Dashboard:** Cashflow-Cockpit mit Einnahmen, Ausgaben, Sparquote und interaktivem SVG-Donut-Diagramm.
+**Dagobert geht den schlanken Weg:**
+- **Ein Container, eine SQLite-Datei.** Kein Postgres, kein MySQL, kein Redis.
+- **Für comdirect gebaut:** CSV-Import mit eigenem Parser und Direktabruf über die offizielle comdirect-API.
+- **Eine Oberfläche, zwei Auslieferungen:** im Browser (Docker, PWA-tauglich) und als native iPhone-App.
+- **Deine Daten bleiben bei dir:** auf deinem Server oder auf deinem iPhone, auf Wunsch per iCloud zwischen deinen Geräten.
 
 ---
 
-## 🚀 Schnelle Installation (In 2 Minuten startklar)
+## 📱 iPhone-App (in Entwicklung)
 
-Dagobert läuft als schlanker All-in-One-Container. Du musst **weder Git noch Node.js** installiert haben!
+Die iOS-App nutzt dieselbe Oberfläche wie die Web-Version, läuft aber **ohne Server**: Alle Daten liegen in einer lokalen SQLite-Datenbank auf dem Gerät.
+
+- **Face ID / Geräte-Sperre** schützt die App beim Öffnen.
+- **Bankzugang im iOS-Schlüsselbund (Keychain)** statt in einer Datei.
+- **iCloud-Sync (optional):** Abgleich über deine **private** iCloud-Datenbank. Datensätze liegen dort in verschlüsselten Feldern. Dagobert betreibt dafür keinen eigenen Server.
+- **CSV-Dateien öffnen:** comdirect-Exporte lassen sich aus „Dateien“ oder anderen Apps an Dagobert übergeben. Importiert wird erst nach deiner Bestätigung.
+- **Austausch mit der Docker-Version:** Backups laufen in beide Richtungen. Ein Export aus Docker lässt sich am iPhone einlesen und umgekehrt.
+
+> **Status:** Die App wird gerade auf echten Geräten getestet. Sobald sie fertig ist, erscheint sie im **App Store**. Bis dahin gibt es keine öffentliche Testversion.
 
 ---
 
-### Methode 1: Portainer (Empfohlen für Homelab / Server)
-Ideal für jedes System mit Portainer (Synology, Unraid, Raspberry Pi, VPS):
+## 🚀 Funktionen
 
-1. Öffne **Portainer** ➔ Wähle dein Environment ➔ Klicke auf **Stacks** ➔ **Add Stack**.
-2. Name eingeben (z. B. `dagobert`).
-3. Folgende Konfiguration im Web-Editor einfügen:
+### 💳 comdirect: CSV-Import und Direktabruf
+- **Direktabruf per comdirect-API:** Umsätze und Kontostand direkt abrufen, freigegeben per **pushTAN** in der comdirect-App. Du brauchst dafür deinen eigenen API-Zugang (Client-ID/Secret aus dem comdirect-Entwicklerbereich).
+- **Gespeicherter Zugang:** Ist der Zugang hinterlegt, wird aus „Import“ in der Kopfzeile „Sync“, der den Abruf direkt öffnet. Docker speichert den Zugang verschlüsselt (AES-256-GCM), iOS im Schlüsselbund.
+- **CSV-Import mit CP1252-Decoder:** Kein Umlaut-Chaos mehr (`Kartenverf¸gung` ➔ `Kartenverfügung`). Metadaten-Zeilen am Dateianfang werden übersprungen.
+- **Textzerlegung:** Auftraggeber/Empfänger, Vorgangsart und Verwendungszweck werden aus dem Buchungstext getrennt.
+- **Duplikat-Schutz:** Feste Buchungs-IDs verhindern doppelte Einträge bei überlappenden Exporten.
+
+### 📊 Übersicht und Budget
+- **Kontostand als Grundlage:** Der Geldbestand rechnet vom letzten comdirect-Saldo oder deinem Startsaldo aus nur mit gebuchten Umsätzen. Einnahmen, Ausgaben und Monatsergebnis sind Auswertung, kein zweiter Bestand.
+- **Budgetmonat „Gehalt bis Gehalt“:** Optional zählt ein Gehalt ab einem Stichtag schon zum Folgemonat. Buchungsliste und Statistik bleiben beim echten Buchungsdatum.
+- **Monatsergebnis mit Sparquote:** Einnahmen und Ausgaben in einer Kachel, abschaltbar.
+- **Vergangene Monate:** Kontostand am Monatsende neben dem aktuellen Stand.
+- **Sparen & Investieren:** Wahlweise verrechnet, als Überschuss-Zeile oder als Umbuchung außerhalb von Einnahmen/Ausgaben.
+- **Alle Kategorien im Blick:** Ein Tipp auf eine Kategorie öffnet die passenden Buchungen des Zeitraums.
+
+### 📈 Statistik
+- **Kontostand-Verlauf:** Monatsend-Stände pro Jahr oder die letzten 12 Monate, zum Antippen, mit Tabellenansicht.
+- **Ausgaben nach Kategorie** als interaktives Donut-Diagramm.
+
+### 🧠 Regeln
+- **Kriterien:** Empfänger, Verwendungszweck, Buchungstext, Betrag oder Buchungsart (enthält, exakt, Regex).
+- **Regel beim Kategorisieren anlegen:** Dagobert schlägt nach dem Kategorisieren direkt eine Regel vor.
+- **Rückwirkend anwenden** auf passende ältere Buchungen.
+- **Standard-Regelwerk** für gängige Händler, Supermärkte, Tankstellen und Abos.
+
+### 👥 Profile und Sicherheit
+- **Getrennte Profile** für Privat, Geschäft oder Familie, mit eigenen Farben, Symbolen und PIN.
+- **Server-PIN (Docker):** Ohne bestätigte PIN liefert die API keine Daten. Dazu kommen eine Sperre gegen Durchprobieren und eine Sitzung von 12 Stunden.
+- **Backups:** Export pro Profil oder für alle Profile. Vor einem ersetzenden Import wird der alte Stand gesichert.
+- **Kein Tracking, keine Telemetrie.**
+
+---
+
+## 🐳 Installation (Docker)
+
+Dagobert läuft als All-in-One-Container. Du brauchst **weder Git noch Node.js**.
+
+### Methode 1: Portainer (empfohlen für Homelab/Server)
+
+1. **Portainer** ➔ Environment wählen ➔ **Stacks** ➔ **Add Stack**.
+2. Name eingeben (z. B. `dagobert`) und Folgendes einfügen:
 
 ```yaml
-version: 3.8
-
 services:
   dagobert:
     image: ghcr.io/hehljo/dagobert:latest
@@ -103,22 +120,15 @@ volumes:
   dagobert_data:
 ```
 
-4. Klicke unten auf **Deploy the stack**.
-5. Fertig! Öffne im Browser: `http://<deine-server-ip>:5052`
+3. **Deploy the stack** ➔ im Browser `http://SERVER-IP:5052` öffnen.
 
----
+### Methode 2: Synology DiskStation (Container Manager, DSM 7.2)
 
-### Methode 2: Synology DiskStation (Container Manager / DSM 7.2)
-Ganz ohne Terminal direkt über die Synology-Weboberfläche:
-
-1. Öffne im Synology DSM den **Container Manager**.
-2. Klicke links auf **Projekt** ➔ **Erstellen**.
-3. Projektname: `dagobert`, Pfad: Wähle deinen Docker-Ordner (z. B. `/docker/dagobert`).
-4. Wähle *docker-compose.yaml erstellen* und füge folgenden Code ein:
+1. **Container Manager** ➔ **Projekt** ➔ **Erstellen**.
+2. Projektname `dagobert`, Pfad z. B. `/docker/dagobert`.
+3. *docker-compose.yaml erstellen* und einfügen:
 
 ```yaml
-version: 3.8
-
 services:
   dagobert:
     image: ghcr.io/hehljo/dagobert:latest
@@ -130,13 +140,9 @@ services:
       - /volume1/docker/dagobert/data:/app/data
 ```
 
-5. Klicke auf **Weiter** ➔ **Fertigstellen**. Der Container wird automatisch heruntergeladen und gestartet.
-6. Im Browser aufrufen: `http://<diskstation-ip>:5052`
+4. **Weiter** ➔ **Fertigstellen** ➔ im Browser `http://DISKSTATION-IP:5052` öffnen.
 
----
-
-### Methode 3: Schneller Docker-Befehl (Terminal Einzeiler)
-Wenn du Docker auf Linux, macOS oder Windows installiert hast:
+### Methode 3: Docker-Befehl
 
 ```bash
 docker run -d \
@@ -147,46 +153,36 @@ docker run -d \
   ghcr.io/hehljo/dagobert:latest
 ```
 
----
-
-### Methode 4: Für Entwickler (Lokal aus Quellcode bauen)
-Falls du selbst am Code mitentwickeln möchtest:
+### Methode 4: Aus dem Quellcode bauen
 
 ```bash
-# 1. Repository klonen
 git clone https://github.com/hehljo/Dagobert.git
 cd Dagobert
-
-# 2. Container mit lokalem Multi-Stage Build starten
 docker compose up -d --build
 ```
 
 ---
 
-## 🛠️ Lokale Entwicklung & Tests
+## 🛠️ Entwicklung
 
-```bash
-# Abhängigkeiten installieren
-npm install
+| Zweck | Befehl |
+|---|---|
+| Abhängigkeiten | `npm install` |
+| Entwicklungsserver | `npm run dev` |
+| Unit- und Node-Tests | `npm test` |
+| Browser-Workflows (Playwright) | `npm run test:ui` |
+| Produktions-Build inkl. Typcheck | `npm run build` |
+| iOS-Projekt synchronisieren | `npm run cap:sync` |
 
-# Entwicklungsserver starten
-npm run dev
+**Aufbau in Kürze:** React 19 + Vite + Tailwind. Die Oberfläche spricht nur eine Repository-Schnittstelle. Im Browser geht die per HTTP an den Express-Server mit SQLite, in der iOS-App über Capacitor an ein Swift-Plugin mit eigener SQLite und CloudKit. Details: [`MOBILE_ARCHITECTURE.md`](MOBILE_ARCHITECTURE.md).
 
-# Tests ausführen (Vitest & Node Test-Runner)
-npm test
-
-# Vollständige UI- & Browser-Workflows via Playwright prüfen
-npm run test:ui
-
-# Produktions-Build erstellen
-npm run build
-```
+Testdaten sind ausschließlich synthetisch, z. B. [`docs/comdirect_demo_umsaetze.csv`](docs/comdirect_demo_umsaetze.csv).
 
 ---
 
-## ☕ Support & Kaffee
+## ☕ Support
 
-Dagobert wird unabhängig als Open-Source-Projekt für das eigene Homelab entwickelt. Wenn dir das Tool gefällt oder dir bei deinen Finanzen Klicks und Nerven spart, freue ich mich über einen Kaffee:
+Dagobert entsteht unabhängig als Open-Source-Projekt. Wenn es dir Klicks und Nerven spart, freue ich mich über einen Kaffee:
 
 <p align="center">
   <a href="https://buymeacoffee.com/pommesbude" target="_blank">
@@ -196,12 +192,14 @@ Dagobert wird unabhängig als Open-Source-Projekt für das eigene Homelab entwic
 
 ---
 
-## 📄 Lizenz & Urheberschaft
+## 📄 Lizenz
 
-Dieses Projekt ist unter der **[MIT-Lizenz](LICENSE)** lizenziert – frei nutzbar, modifizierbar und selbst hostbar.
+**[MIT-Lizenz](LICENSE)**: frei nutzbar, veränderbar und selbst hostbar.
 Copyright (c) 2026 Johannes Hehl.
+
+Dagobert ist kein Angebot der comdirect bank AG und steht in keiner Verbindung zu ihr. „comdirect“ ist eine Marke ihres Inhabers.
 
 ---
 
-## 🏷️ GitHub Topics & Tags
-`personal-finance` · `self-hosted` · `fintech` · `budgeting` · `comdirect` · `local-first` · `docker` · `sqlite` · `react` · `typescript` · `synology` · `homelab` · `csv-parser`
+## 🏷️ Topics
+`personal-finance` · `self-hosted` · `budgeting` · `comdirect` · `local-first` · `docker` · `sqlite` · `react` · `typescript` · `capacitor` · `ios` · `cloudkit` · `synology` · `homelab` · `csv-parser`

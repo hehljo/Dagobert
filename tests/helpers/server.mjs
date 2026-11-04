@@ -18,7 +18,7 @@ export async function startTestServer() {
       child.kill();
       await once(child, 'exit');
     }
-    await rm(directory, { recursive: true, force: true });
+    if (process.env.DAGOBERT_KEEP_TEST_DATA !== '1') await rm(directory, { recursive: true, force: true });
   }
   try {
     const url = await new Promise((resolve, reject) => {
@@ -31,7 +31,7 @@ export async function startTestServer() {
         if (match) { clearTimeout(timer); resolve(match[0]); }
       });
     });
-    return { url, stop };
+    return { url, stop, directory };
   } catch (err) {
     await stop();
     throw err;

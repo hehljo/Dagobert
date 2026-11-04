@@ -1,6 +1,6 @@
 import type { Account, Category, Profile } from '../types/index.ts';
-import React, { useState, useEffect } from 'react';
-import { Download, Upload, Trash2, Shield, Moon, Sun, Database, Sparkles, Fingerprint, KeyRound, Lock, Check, Landmark, Tag, Plus, X, Cloud, CloudOff, RefreshCw, Share2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Download, Upload, Trash2, Shield, Moon, Sun, Sparkles, Fingerprint, KeyRound, Check, Tag, Plus, X, Cloud, CloudOff, RefreshCw, Share2 } from 'lucide-react';
 // db helpers
 import { parseGermanAmount } from '../lib/csvParser.ts';
 import { updateAccountSettings, exportProfileBackup, resetProfileData, batchImportTransactions, createCategory, deleteCategory, updateProfilePin } from '../lib/api.ts';
@@ -10,8 +10,11 @@ import { CategoryIcon, AVAILABLE_CATEGORY_ICONS, AVAILABLE_CATEGORY_COLORS } fro
 import { BackupImportModal } from './BackupImportModal.tsx';
 import { getRepository } from '../data/repository.ts';
 import { detectPlatform } from '../platform/capabilities.ts';
-import type { CloudKitSyncStatus } from '../data/interfaces.ts';
-import { Share } from '@capacitor/share';
+import type { CloudKitSyncStatus, SyncConflict, RecoveryBackup } from '../data/interfaces.ts';
+import { syncStatusLabel } from '../lib/syncStatus.ts';
+import { SettingsSection } from './SettingsSection.tsx';
+import { SalaryBudgetSettings } from './SalaryBudgetSettings.tsx';
+import { APP_UNLOCKED_EVENT, isAppLockedError } from '../platform/appAccess.ts';
 
 interface SettingsViewProps {
   profile?: Profile;
@@ -37,7 +40,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
   const [initBalInput, setInitBalInput] = useState(account ? account.initialBalance.toFixed(2).replace('.', ',') : '0,00');
   const [initDateInput, setInitDateInput] = useState(account?.initialBalanceDate || '2026-01-01');
   const [checkpointBalInput, setCheckpointBalInput] = useState(
-    account?.checkpointBalance !== undefined ? account.checkpointBalance.toFixed(2).replace('.', ',') : ''
+    typeof account?.checkpointBalance === 'number' ? account.checkpointBalance.toFixed(2).replace('.', ',') : ''
   );
   const [checkpointDateInput, setCheckpointDateInput] = useState(account?.checkpointDate || '');
 
@@ -113,28 +116,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
     setIsSavingProfilePin(true);
     try {
       await updateProfilePin(profileId, clean);
-      setProfilePinNotice('Profil-PIN erfolgreich auf dem Server gespeichert! Jedes neue Gerät muss diese PIN eingeben.');
+      setProfilePinNotice(platform.isNative ? 'Profil-PIN auf diesem Gerät gespeichert. Andere Geräte benötigen eine eigene PIN-Einrichtung.' : 'Profil-PIN erfolgreich auf dem Server gespeichert! Jedes neue Gerät muss diese PIN eingeben.');
       setShowProfilePinSetup(false);
       setProfilePinInput('');
       onProfilesChanged?.(true);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Fehler beim Speichern der Server-PIN');
+      alert(err instanceof Error ? err.message : 'Fehler beim Speichern der Profil-PIN');
     } finally {
       setIsSavingProfilePin(false);
     }
   };
 
   const handleRemoveProfilePin = async () => {
-    if (confirm('Profil-PIN auf dem Server wirklich entfernen? Jedes Gerät im Netzwerk hat dann wieder direkten Zugriff auf alle Buchungen.')) {
+    if (confirm(platform.isNative ? 'Profil-PIN auf diesem Gerät entfernen? Dieses Profil lässt sich danach ohne eigene PIN öffnen.' : 'Profil-PIN auf dem Server wirklich entfernen? Der gespeicherte Bankzugang wird dabei entfernt. Jedes Gerät im Netzwerk hat dann wieder direkten Zugriff auf alle Buchungen.')) {
       setIsSavingProfilePin(true);
       try {
         await updateProfilePin(profileId, null);
-        setProfilePinNotice('Profil-PIN auf dem Server entfernt.');
+        setProfilePinNotice(platform.isNative ? 'Profil-PIN auf diesem Gerät entfernt.' : 'Profil-PIN auf dem Server entfernt.');
         setShowProfilePinSetup(false);
         setProfilePinInput('');
         onProfilesChanged?.(true);
       } catch (err) {
-        alert(err instanceof Error ? err.message : 'Fehler beim Entfernen der Server-PIN');
+        alert(err instanceof Error ? err.message : 'Fehler beim Entfernen der Profil-PIN');
       } finally {
         setIsSavingProfilePin(false);
       }
@@ -142,6 +145,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
   };
 
   const handleToggleSecurity = async () => {
+    if (detectPlatform().isNative) {
+      const repo = getRepository();
+      if (!repo.setAppLockEnabled) return;
+      try {
+        await repo.setAppLockEnabled(!security.enabled);
+        setSecurity({ enabled: !security.enabled, type: 'passkey' });
+        setSecNotice(!security.enabled ? 'App-Sperre aktiviert. Beim Wiederöffnen wird der Gerätecode, Face ID oder Touch ID benötigt.' : 'App-Sperre deaktiviert.');
+      } catch (error) { setSecNotice(error instanceof Error ? error.message : 'App-Sperre wurde nicht geändert.'); }
+      return;
+    }
+
     if (security.enabled) {
       if (confirm('App-Sperre deaktivieren?')) {
         const next: SecurityConfig = { enabled: false, type: 'pin' };
@@ -150,22 +164,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
         setSecNotice('App-Sperre deaktiviert.');
       }
       return;
-    }
-
-    // 1. Try native iOS Face ID / Touch ID
-    if (nativeBiometricsAvailable && getRepository().authenticateBiometrics) {
-      try {
-        const ok = await getRepository().authenticateBiometrics!('App-Sperre mit Face ID / Touch ID aktivieren');
-        if (ok) {
-          const next: SecurityConfig = { enabled: true, type: 'passkey' };
-          saveSecurityConfig(next);
-          setSecurity(next);
-          setSecNotice('Face ID / Touch ID erfolgreich eingerichtet!');
-          return;
-        }
-      } catch (err: unknown) {
-        console.warn('Native biometric setup not completed:', err);
-      }
     }
 
     // 2. Try WebAuthn passkey if supported
@@ -206,45 +204,81 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState<CloudKitSyncStatus | null>(null);
   const [isSyncingNow, setIsSyncingNow] = useState(false);
-  const [nativeBiometricsAvailable, setNativeBiometricsAvailable] = useState(false);
+  const [isChangingSync, setIsChangingSync] = useState(false);
+  const [syncReadError, setSyncReadError] = useState<string | null>(null);
+  const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
+  const [recoveries, setRecoveries] = useState<RecoveryBackup[]>([]);
+  const [isReviewingConflicts, setIsReviewingConflicts] = useState(false);
   const platform = detectPlatform();
 
-  // Load CloudKit & Biometrics status
-  useEffect(() => {
+  const refreshSyncStatus = useCallback(async () => {
     const repo = getRepository();
-    if (repo.getSyncStatus) {
-      repo.getSyncStatus().then(setSyncStatus).catch(() => {});
-    }
-    if (repo.canUseBiometrics) {
-      repo.canUseBiometrics().then(setNativeBiometricsAvailable).catch(() => {});
+    if (!repo.getSyncStatus) return;
+    try {
+      setSyncStatus(await repo.getSyncStatus());
+      setSyncReadError(null);
+    } catch (error) {
+      if (isAppLockedError(error)) { setSyncReadError(null); return; }
+      setSyncStatus(null);
+      setSyncReadError('iCloud-Status konnte nicht gelesen werden. Bitte erneut versuchen.');
     }
   }, []);
 
+  useEffect(() => {
+    if (!platform.hasCloudKit) return;
+    let pending = false;
+    const refresh = async () => {
+      if (document.hidden || pending) return;
+      pending = true;
+      try { await refreshSyncStatus(); } finally { pending = false; }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 15000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener(APP_UNLOCKED_EVENT, refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener(APP_UNLOCKED_EVENT, refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [platform.hasCloudKit, refreshSyncStatus]);
+
+  // Device security and recovery metadata are independent of CloudKit availability.
+  useEffect(() => {
+    const repo = getRepository();
+    if (repo.getDeviceSecurity) repo.getDeviceSecurity().then(config => setSecurity({ enabled: config.enabled, type: 'passkey' })).catch(() => setSecNotice('Gerätesicherheit konnte nicht gelesen werden.'));
+    if (repo.getRecoveryBackups) repo.getRecoveryBackups(profileId).then(setRecoveries).catch(() => {});
+  }, [profileId]);
+
   const handleToggleSync = async () => {
     const repo = getRepository();
-    if (!repo.setSyncEnabled) return;
+    if (!repo.setSyncEnabled || !syncStatus || isChangingSync || isSyncingNow) return;
     const next = !syncStatus?.enabled;
+    if (next && !confirm('iCloud für diesen Apple-Account aktivieren? Lokale und vorhandene iCloud-Daten werden zusammengeführt. Spätere Änderungen wirken auch auf deine anderen iPhones und iPads.')) return;
+    setIsChangingSync(true);
     try {
       await repo.setSyncEnabled(next);
-      const updated = await repo.getSyncStatus?.();
-      if (updated) setSyncStatus(updated);
     } catch (err: any) {
       alert(err.message || 'Fehler beim Ändern des iCloud-Status.');
+    } finally {
+      await refreshSyncStatus();
+      setIsChangingSync(false);
     }
   };
 
   const handleTriggerSync = async () => {
     const repo = getRepository();
-    if (!repo.triggerSync) return;
+    if (!repo.triggerSync || isChangingSync || isSyncingNow) return;
     setIsSyncingNow(true);
     try {
       await repo.triggerSync();
-      const updated = await repo.getSyncStatus?.();
-      if (updated) setSyncStatus(updated);
       onDataChanged();
     } catch (err: any) {
       alert(err.message || 'Synchronisierung fehlgeschlagen.');
     } finally {
+      await refreshSyncStatus();
       setIsSyncingNow(false);
     }
   };
@@ -256,18 +290,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       const jsonStr = JSON.stringify(data, null, 2);
       const filename = `dagobert_${allProfiles ? 'gesamtbackup' : 'backup'}_${new Date().toISOString().slice(0, 10)}.json`;
 
-      // Check Native Share Sheet
       if (platform.isNative) {
-        try {
-          await Share.share({
-            title: 'Dagobert Backup',
-            text: jsonStr,
-            dialogTitle: 'Dagobert Sicherung speichern oder teilen'
-          });
-          return;
-        } catch {
-          // Fallback to browser blob below
-        }
+        const share = getRepository().shareBackup;
+        if (!share) throw new Error('Die native Dateifreigabe fehlt.');
+        await share.call(getRepository(), data);
+        return;
       }
 
       const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -277,6 +304,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
       a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Backup konnte nicht exportiert werden.');
     } finally {
       setIsExporting(false);
     }
@@ -382,18 +411,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
   return (
     <div className="space-y-5 pb-24 max-w-5xl mx-auto px-4 pt-4">
       {/* Privacy Notice Banner */}
-      <div className="bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/20 rounded-3xl p-5 flex items-start space-x-3.5">
+      <SettingsSection id="privacy" title={platform.isNative ? 'Lokal gespeichert, iCloud optional' : 'Speicherung auf deinem Server'} profileId={profileId}>
         <Shield className="w-6 h-6 text-emerald-500 flex-shrink-0 mt-0.5" />
         <div className="text-xs space-y-1">
-          <h3 className="font-bold text-sm text-slate-900 dark:text-white">100% Local-First &amp; Privat</h3>
           <p className="text-slate-600 dark:text-slate-300">
-            Deine Finanzdaten und Kontoumsätze verlassen niemals dieses Gerät. Die gesamte Verarbeitung, der CSV-Import und die Speicherung laufen ausschließlich lokal in deiner Browser-Datenbank (IndexedDB).
+            {platform.isNative
+              ? 'Deine Kontodaten liegen auf diesem iPhone oder iPad. Ohne aktivierte iCloud-Synchronisierung braucht Dagobert keinen Server. JSON-Exporte kannst du selbst übertragen.'
+              : 'Deine Kontodaten liegen in der SQLite-Datenbank deiner Dagobert-Installation. Der Browser greift auf diesen Server zu. JSON-Exporte kannst du selbst übertragen.'}
           </p>
         </div>
-      </div>
+      </SettingsSection>
 
       {/* Profil-PIN (Globaler Server-Schutz) */}
-      <div className="glass-surface rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
+      <SalaryBudgetSettings key={profileId} profileId={profileId} categories={categories} />
+
+      {!platform.isNative && <SettingsSection id="profile-pin" title="Profil-PIN" profileId={profileId}>
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${profile?.hasPin ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'}`}>
@@ -401,7 +433,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
             </div>
             <div>
               <p className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                <span>{profile?.hasPin ? 'Profil-PIN aktiv (Server-Schutz)' : 'Kein Server-Schutz aktiv'}</span>
+                <span>{platform.isNative ? (profile?.hasPin ? 'Profil-PIN auf diesem Gerät aktiv' : 'Keine Profil-PIN auf diesem Gerät') : (profile?.hasPin ? 'Profil-PIN aktiv (Server-Schutz)' : 'Kein Server-Schutz aktiv')}</span>
                 {profile?.hasPin ? (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">Gesperrt</span>
                 ) : (
@@ -409,7 +441,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
                 )}
               </p>
               <p className="text-xs text-ios-gray">
-                {profile?.hasPin
+                {platform.isNative ? 'Die Profil-PIN gilt für dieses Gerät und wird nicht per Backup oder iCloud übertragen.' : profile?.hasPin
                   ? 'Alle neuen Geräte und Browser müssen diese PIN eingeben'
                   : 'Achtung: Jedes Gerät im Netzwerk kann deine Umsätze ohne Abfrage laden!'}
               </p>
@@ -420,7 +452,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
             onClick={() => setShowProfilePinSetup(!showProfilePinSetup)}
             className="px-3.5 py-2 bg-ios-tint/10 hover:bg-ios-tint/20 text-ios-tint rounded-xl text-xs font-semibold transition-colors min-h-[44px]"
           >
-            {profile?.hasPin ? 'PIN ändern / löschen' : 'Server-PIN einrichten'}
+            {profile?.hasPin ? 'PIN ändern / löschen' : platform.isNative ? 'Profil-PIN einrichten' : 'Server-PIN einrichten'}
           </button>
         </div>
 
@@ -435,7 +467,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
           <form onSubmit={handleSaveProfilePin} className="p-4 bg-slate-50 dark:bg-neutral-800/60 rounded-2xl space-y-3 animate-fade-in text-xs border border-ios-separator dark:border-ios-darkSeparator">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-slate-800 dark:text-slate-200">
-                {profile?.hasPin ? 'Profil-PIN auf dem Server ändern' : 'Neue Server-PIN vergeben (4-6 Ziffern)'}
+                {platform.isNative ? 'Profil-PIN für dieses Gerät (4–6 Ziffern)' : profile?.hasPin ? 'Profil-PIN auf dem Server ändern' : 'Neue Server-PIN vergeben (4-6 Ziffern)'}
               </span>
               <button
                 type="button"
@@ -446,14 +478,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
               </button>
             </div>
             <p className="text-[11px] text-ios-gray">
-              Diese PIN wird zentral auf dem Server (SQLite) verschlüsselt gespeichert. Jedes neue Gerät, jeder Browser und jede abgelaufene Sitzung muss sie eingeben, bevor überhaupt Kontodaten geladen werden.
+              {platform.isNative ? 'Die PIN wird auf diesem Gerät geschützt gespeichert. Sie muss nach dem erneuten Öffnen für dieses Profil eingegeben werden.' : 'Die PIN wird auf deinem Server geschützt gespeichert. Neue Geräte, Browser und abgelaufene Sitzungen benötigen sie vor dem Laden der Kontodaten.'}
             </p>
             <div className="flex space-x-2">
               <input
                 type="password"
                 maxLength={6}
                 placeholder="4-6 Ziffern"
-                aria-label="Neue Server-PIN"
+                aria-label={platform.isNative ? 'Neue Profil-PIN' : 'Neue Server-PIN'}
                 inputMode="numeric"
                 value={profilePinInput}
                 onChange={(e) => setProfilePinInput(e.target.value)}
@@ -464,7 +496,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
                 disabled={profilePinInput.length < 4 || isSavingProfilePin}
                 className="px-4 py-2 bg-ios-tint text-white rounded-xl font-semibold disabled:opacity-50"
               >
-                {isSavingProfilePin ? 'Speichert…' : 'Auf Server speichern'}
+                {isSavingProfilePin ? 'Speichert…' : platform.isNative ? 'Auf Gerät speichern' : 'Auf Server speichern'}
               </button>
             </div>
             {profile?.hasPin && (
@@ -475,21 +507,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
                   onClick={handleRemoveProfilePin}
                   className="text-ios-red text-xs font-medium hover:underline"
                 >
-                  Server-PIN komplett entfernen
+                  {platform.isNative ? 'Profil-PIN auf diesem Gerät entfernen' : 'Server-PIN komplett entfernen'}
                 </button>
               </div>
             )}
           </form>
         )}
-      </div>
+      </SettingsSection>}
 
       {/* Security & App Lock (Passkey / PIN) */}
-      <div className="glass-surface rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
-        <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-          <Lock className="w-4 h-4 text-ios-tint" />
-          <span>Sicherheit &amp; App-Sperre</span>
-        </h3>
+      <SettingsSection id="security" title="Sicherheit & App-Sperre" profileId={profileId}>
 
+        {platform.isNative ? <div className="flex items-start gap-3">
+          <Fingerprint className="w-6 h-6 text-ios-tint shrink-0" aria-hidden="true" />
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-slate-900 dark:text-white">Face ID, Touch ID oder Gerätecode</p>
+            <p className="text-xs text-ios-gray">Schützt die gesamte App beim Öffnen und nach der Rückkehr. Du brauchst keine zusätzliche App- oder Profil-PIN.</p>
+          </div>
+        </div> : <>
         {secNotice && (
           <div className="p-3 bg-ios-green/10 border border-ios-green/20 rounded-2xl flex items-center space-x-2 text-ios-green text-xs font-medium">
             <Check className="w-4 h-4" />
@@ -508,7 +543,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
             </div>
             <div>
               <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                {security.enabled ? (security.type === 'passkey' ? 'Passkey aktiv' : 'PIN-Sperre aktiv') : 'App-Sperre inaktiv'}
+                {security.enabled ? (platform.isNative ? 'Gerätesperre aktiv' : security.type === 'passkey' ? 'Passkey aktiv' : 'PIN-Sperre aktiv') : 'App-Sperre inaktiv'}
               </p>
               <p className="text-xs text-ios-gray">
                 {security.enabled
@@ -574,19 +609,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
             </div>
           </form>
         )}
-      </div>
+        </>}
+      </SettingsSection>
 
             {/* Account & Initial Balance Management */}
-      <div className="glass-surface rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
-        <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-          <Landmark className="w-4 h-4 text-ios-tint" />
-          <span>Konto &amp; Startsaldo</span>
-        </h3>
+      <SettingsSection id="account" title="Konto & Startsaldo" profileId={profileId} defaultOpen>
 
         <form onSubmit={handleSaveAccount} className="space-y-4 text-xs">
           {/* Stichtags-Saldo (comdirect Checkpoint) */}
           <div className="p-3.5 bg-slate-50 dark:bg-neutral-800/40 border border-slate-200 dark:border-neutral-700/60 rounded-2xl space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <span className="font-semibold text-slate-800 dark:text-slate-200">
                 comdirect-Stichtag &amp; Kontostand
               </span>
@@ -595,26 +627,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
               </span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="font-semibold text-ios-gray block mb-1">Kontostand laut Auszug</label>
-                <div className="relative">
+              <div className="min-w-0">
+                <label className="font-semibold text-ios-gray block mb-1" htmlFor="checkpointBalInput">Kontostand laut Auszug</label>
+                <div className="relative min-w-0">
                   <input
                     type="text"
                     placeholder="z.B. -215,30"
-                    value={checkpointBalInput}
+                    id="checkpointBalInput" value={checkpointBalInput}
                     onChange={(e) => setCheckpointBalInput(e.target.value)}
-                    className="w-full px-3 py-2 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-xl outline-none font-mono text-sm"
+                    className="w-full min-w-0 max-w-full min-h-12 px-3 py-2 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-xl outline-none font-mono text-base pr-8"
                   />
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-ios-gray font-semibold">€</span>
                 </div>
               </div>
-              <div>
-                <label className="font-semibold text-ios-gray block mb-1">Stichtagsdatum</label>
+              <div className="min-w-0">
+                <label className="font-semibold text-ios-gray block mb-1" htmlFor="checkpointDateInput">Stichtagsdatum</label>
                 <input
                   type="date"
-                  value={checkpointDateInput}
+                  id="checkpointDateInput" value={checkpointDateInput}
                   onChange={(e) => setCheckpointDateInput(e.target.value)}
-                  className="w-full px-3 py-2 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-xl outline-none"
+                  className="w-full min-w-0 max-w-full min-h-12 px-3 py-2 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-xl outline-none"
                 />
               </div>
             </div>
@@ -622,26 +654,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
 
           {/* Startsaldo */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-            <div>
-              <label className="font-semibold text-ios-gray block mb-1">Startsaldo (vor erstem Stichtag)</label>
-              <div className="relative">
+            <div className="min-w-0">
+              <label className="font-semibold text-ios-gray block mb-1" htmlFor="initBalInput">Startsaldo (vor erstem Stichtag)</label>
+              <div className="relative min-w-0">
                 <input
                   type="text"
-                  value={initBalInput}
+                  id="initBalInput" value={initBalInput}
                   onChange={(e) => setInitBalInput(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-100 dark:bg-neutral-800 rounded-xl outline-none font-mono text-sm"
+                  className="w-full min-w-0 max-w-full min-h-12 px-3 py-2 bg-slate-100 dark:bg-neutral-800 rounded-xl outline-none font-mono text-base pr-8"
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-ios-gray font-semibold">€</span>
               </div>
             </div>
 
-            <div>
-              <label className="font-semibold text-ios-gray block mb-1">Stichtag für Startsaldo</label>
+            <div className="min-w-0">
+              <label className="font-semibold text-ios-gray block mb-1" htmlFor="initDateInput">Stichtag für Startsaldo</label>
               <input
                 type="date"
-                value={initDateInput}
+                id="initDateInput" value={initDateInput}
                 onChange={(e) => setInitDateInput(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-100 dark:bg-neutral-800 rounded-xl outline-none"
+                className="w-full min-w-0 max-w-full min-h-12 px-3 py-2 bg-slate-100 dark:bg-neutral-800 rounded-xl outline-none"
               />
             </div>
           </div>
@@ -653,14 +685,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
             Kontoeinstellungen speichern
           </button>
         </form>
-      </div>
+      </SettingsSection>
 
       {/* Categories Management */}
-      <div className="glass-surface rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
+      <SettingsSection id="categories" title={`Kategorien (${categories.length})`} profileId={profileId}>
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <Tag className="w-4 h-4 text-ios-tint" />
-            <h3 className="font-bold text-sm text-slate-900 dark:text-white">Kategorien ({categories.length})</h3>
           </div>
           <button
             onClick={() => setShowAddCategory(!showAddCategory)}
@@ -795,11 +826,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
             </div>
           ))}
         </div>
-      </div>
+      </SettingsSection>
 
       {/* Theme & Display */}
-      <div className="glass-surface rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
-        <h3 className="font-bold text-sm text-slate-900 dark:text-white">Darstellung</h3>
+      <SettingsSection id="appearance" title="Darstellung" profileId={profileId}>
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-neutral-800 flex items-center justify-center">
@@ -818,10 +848,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
             <div className={`w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${isDark ? 'translate-x-5' : 'translate-x-0'}`} />
           </button>
         </div>
-      </div>
+      </SettingsSection>
 
       {/* iCloud Synchronization (Native & CloudKit) */}
-      <div className="glass-surface rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
+      {platform.hasCloudKit && <SettingsSection id="icloud" title="iCloud-Synchronisierung" profileId={profileId}>
+
+      <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/50 flex items-center justify-center">
@@ -837,7 +869,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
 
           <button
             onClick={handleToggleSync}
-            disabled={!platform.hasCloudKit}
+            disabled={!platform.hasCloudKit || !syncStatus || isChangingSync || isSyncingNow}
             aria-label={syncStatus?.enabled ? "iCloud-Sync deaktivieren" : "iCloud-Sync aktivieren"}
             className={`w-12 h-7 rounded-full p-1 transition-colors ${syncStatus?.enabled ? 'bg-ios-green' : 'bg-slate-300 dark:bg-neutral-700'} ${!platform.hasCloudKit ? 'opacity-40 cursor-not-allowed' : ''}`}
           >
@@ -857,16 +889,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
               <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-neutral-800/50 border border-ios-separator/50 dark:border-ios-darkSeparator/50">
                 <span className="text-ios-gray text-[10px] block">Status</span>
                 <span className="font-semibold text-slate-900 dark:text-white capitalize">
-                  {syncStatus?.state === 'syncing' ? 'Synchronisiert...' : (syncStatus?.state === 'idle' ? 'Bereit' : (syncStatus?.state === 'offline' ? 'Offline' : (syncStatus?.state === 'disabled' ? 'Deaktiviert' : 'Fehler')))}
+                  {syncStatusLabel(syncStatus)}
                 </span>
               </div>
               <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-neutral-800/50 border border-ios-separator/50 dark:border-ios-darkSeparator/50">
                 <span className="text-ios-gray text-[10px] block">Ausstehende Änderungen</span>
                 <span className="font-semibold text-slate-900 dark:text-white">
-                  {syncStatus?.pendingChangesCount || 0}
+                  {syncStatus?.pendingChangesCount ?? '–'}
                 </span>
               </div>
             </div>
+
+            {syncReadError && <div role="alert" className="text-ios-red">
+              <p>{syncReadError}</p>
+              <button className="min-h-11 text-ios-tint" onClick={refreshSyncStatus}>Status erneut laden</button>
+            </div>}
 
             {syncStatus?.lastSyncAt && (
               <p className="text-[11px] text-ios-gray">
@@ -882,7 +919,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
 
             <button
               onClick={handleTriggerSync}
-              disabled={isSyncingNow || !syncStatus?.enabled}
+              disabled={isSyncingNow || isChangingSync || !syncStatus?.enabled}
               className="w-full flex items-center justify-center space-x-2 p-2.5 rounded-xl bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-800 dark:text-slate-200 font-semibold transition-colors disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 text-ios-tint ${isSyncingNow ? 'animate-spin' : ''}`} />
@@ -892,12 +929,37 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
         )}
       </div>
 
+      {platform.hasCloudKit && <div className="glass-surface rounded-3xl p-5 border border-ios-separator dark:border-ios-darkSeparator space-y-3">
+        <button className="min-h-11 text-sm font-semibold text-ios-tint" onClick={async () => {
+          try { const values = await getRepository().getConflicts?.(); setConflicts(values ?? []); setIsReviewingConflicts(true); }
+          catch (error) { alert(error instanceof Error ? error.message : 'Änderungen konnten nicht geladen werden.'); }
+        }}>Widersprüchliche Änderungen prüfen ({syncStatus?.conflictsCount ?? 0})</button>
+        {isReviewingConflicts && <div className="space-y-4">
+          {conflicts.length === 0 && <p className="text-sm text-ios-gray">Keine offenen Konflikte.</p>}
+          {conflicts.map(conflict => <div key={conflict.id} className="space-y-2">
+            <p className="text-sm font-semibold">Beide Versionen sind gesichert. Welcher Stand soll gelten?</p>
+            {conflict.versions.map((version, index) => <div key={index} className="rounded-xl border border-ios-separator dark:border-ios-darkSeparator p-3 space-y-2">
+              <p className="text-sm font-semibold">Version {index + 1}{version.deletedAt ? ' · gelöscht' : ''}</p>
+              <dl className="text-xs space-y-1 break-words">
+                {Object.entries(version.data).filter(([key]) => !['id', 'syncId', 'sourceHash', 'importedAt', 'createdAt'].includes(key)).map(([key, value]) =>
+                  <div key={key}><dt className="text-ios-gray">{({ date: 'Datum', amount: 'Betrag', payee: 'Empfänger', purpose: 'Verwendungszweck', category: 'Kategorie', name: 'Name', enabled: 'Aktiv', account: 'Konto', rawText: 'Buchungstext', type: 'Art', currency: 'Währung', status: 'Buchungsstatus', conditions: 'Bedingungen', priority: 'Priorität', applyCategory: 'Zielkategorie' } as Record<string, string>)[key] ?? key}</dt><dd>{typeof value === 'object' ? JSON.stringify(value) : String(value ?? '–')}</dd></div>)}
+              </dl>
+              <button className="min-h-11 px-4 rounded-xl bg-ios-tint text-white text-sm" onClick={async () => {
+                if (!confirm('Diese Version für alle verbundenen iCloud-Geräte übernehmen?')) return;
+                try {
+                  await getRepository().resolveConflict?.(conflict.id, index);
+                  setConflicts(await getRepository().getConflicts?.() ?? []); onDataChanged();
+                } catch (error) { alert(error instanceof Error ? error.message : 'Version konnte nicht übernommen werden.'); }
+              }}>Version {index + 1} übernehmen</button>
+            </div>)}
+          </div>)}
+          <button className="min-h-11 text-sm text-ios-tint" onClick={() => setIsReviewingConflicts(false)}>Schließen</button>
+        </div>}
+      </div>}
+      </SettingsSection>}
+
       {/* Backup & Data Management */}
-      <div className="glass-surface rounded-3xl p-5 shadow-sm border border-ios-separator dark:border-ios-darkSeparator space-y-4">
-        <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-          <Database className="w-4 h-4 text-ios-tint" />
-          <span>Daten &amp; Backup</span>
-        </h3>
+      <SettingsSection id="backup" title="Daten & Backup" profileId={profileId}>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
           <button
@@ -944,7 +1006,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
             <span>Datenbank zurücksetzen</span>
           </button>
         </div>
-      </div>
+
+
+      {recoveries.length > 0 && <div className="glass-surface rounded-3xl p-5 border border-ios-separator dark:border-ios-darkSeparator space-y-3">
+        <h3 className="text-sm font-semibold">Sicherungen vor dem Ersetzen</h3>
+        <p className="text-xs text-ios-gray">Diese Stände wurden vor einem ersetzenden Import gesichert. Zum Wiederherstellen zuerst exportieren und anschließend über „Backup importieren“ prüfen.</p>
+        {recoveries.slice(-5).map(recovery => <button key={recovery.id} className="block min-h-11 text-sm text-ios-tint text-left" onClick={async () => {
+          try {
+            const data = await getRepository().exportRecoveryBackup?.(recovery.id, profileId);
+            if (!data) throw new Error('Sicherung ist nicht verfügbar.');
+            if (platform.isNative) await getRepository().shareBackup?.(data);
+            else {
+              const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+              const link = document.createElement('a'); link.href = url; link.download = `dagobert_backup_wiederherstellung_${recovery.id}.json`; link.click(); URL.revokeObjectURL(url);
+            }
+          } catch (error) { alert(error instanceof Error ? error.message : 'Export fehlgeschlagen.'); }
+        }}>{recovery.profileName} · {new Date(recovery.exportedAt).toLocaleString('de-DE')} exportieren</button>)}
+      </div>}
+      </SettingsSection>
 
       <BackupImportModal
         isOpen={isBackupModalOpen}
@@ -952,18 +1031,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isDark, onToggleDark
         onClose={() => setIsBackupModalOpen(false)}
         onImportComplete={() => {
           onDataChanged();
-          alert('Backup erfolgreich wiederhergestellt!');
+          onProfilesChanged?.(true);
+          getRepository().getRecoveryBackups?.(profileId).then(setRecoveries).catch(() => {});
+          alert('Backup erfolgreich übernommen. Neue Profile gegebenenfalls über die Profilauswahl öffnen.');
         }}
       />
     
       {/* App Version & Build Info */}
-      <div className="text-center py-4 text-xs text-ios-gray space-y-1">
+      <SettingsSection id="about" title="Über Dagobert" profileId={profileId}><div className="text-center text-xs text-ios-gray space-y-1">
         <p className="font-semibold text-slate-700 dark:text-slate-300">
           Dagobert v{APP_VERSION}
         </p>
         <p className="text-[11px]">
-          Build {BUILD_DATE} · Precision Multi-Profile &amp; SQLite Sync aktiv
+          Build {BUILD_DATE} · {platform.isIOS ? 'Lokale Daten auf diesem Gerät' : 'Lokale Server-Datenbank'}
         </p>
-      </div>
+      </div></SettingsSection>
     </div>
   );};

@@ -1,1462 +1,868 @@
 import Foundation
+import CoreFoundation
 import SQLite3
 
-public final class DagobertDatabase {
-    public static let shared = DagobertDatabase()
-
-    private var db: OpaquePointer?
-    private let queue = DispatchQueue(label: "de.dagobert.database", qos: .userInitiated)
-
-    private init() {
-        openDatabase()
-        createTables()
-        seedDefaultsIfNeeded()
+// JSON dictionaries are confined to the bridge, backup, and CloudKit payload boundary.
+// SQLite owns every authoritative record; there is no IndexedDB mirror.
+public final class DagobertDatabase: @unchecked Sendable {
+    public struct StoreError: LocalizedError {
+        let message: String
+        public var errorDescription: String? { message }
     }
-
-    deinit {
-        if db != nil {
-            sqlite3_close(db)
-        }
-    }
-
-    // MARK: - Open & File Protection
-
-    private func openDatabase() {
-        let fileManager = FileManager.default
-        guard let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            fatalError("Konnte ApplicationSupportDirectory nicht finden.")
-        }
-
-        let dagobertDir = appSupport.appendingPathComponent("Dagobert", isDirectory: true)
-        if !fileManager.fileExists(atPath: dagobertDir.path) {
-            try? fileManager.createDirectory(at: dagobertDir, withIntermediateDirectories: true, attributes: [
-                .protectionKey: FileProtectionType.complete
-            ])
-        }
-
-        let dbURL = dagobertDir.appendingPathComponent("dagobert_local.sqlite")
-
-        if sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) != SQLITE_OK {
-            let errmsg = String(cString: sqlite3_errmsg(db))
-            fatalError("Fehler beim Öffnen der SQLite-Datenbank: \(errmsg)")
-        }
-
-        // Apply File Protection
-        try? fileManager.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: dbURL.path)
-
-        // Enable WAL mode & foreign keys
-        exec("PRAGMA journal_mode = WAL;")
-        exec("PRAGMA foreign_keys = ON;")
-        exec("PRAGMA synchronous = NORMAL;")
-    }
-
-    private func exec(_ sql: String) {
-        var errorMsg: UnsafeMutablePointer<CChar>?
-        if sqlite3_exec(db, sql, nil, nil, &errorMsg) != SQLITE_OK {
-            let msg = errorMsg != nil ? String(cString: errorMsg!) : "Unbekannter Fehler"
-            sqlite3_free(errorMsg)
-            #if DEBUG
-            print("SQLite EXEC Fehler bei [\(sql)]: \(msg)")
-            #endif
-        }
-    }
-
-    // MARK: - Schema
-
-    private func createTables() {
-        exec("""
-        CREATE TABLE IF NOT EXISTS profiles (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            icon TEXT NOT NULL DEFAULT 'User',
-            color TEXT NOT NULL DEFAULT '#0A84FF',
-            pin_hash TEXT,
-            is_default INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            deleted_at TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS accounts (
-            id TEXT NOT NULL,
-            profile_id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            iban TEXT,
-            initial_balance_cents INTEGER NOT NULL DEFAULT 0,
-            initial_balance_date TEXT NOT NULL,
-            checkpoint_balance_cents INTEGER,
-            checkpoint_date TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            deleted_at TEXT,
-            PRIMARY KEY (id, profile_id),
-            FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS categories (
-            id TEXT NOT NULL,
-            profile_id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            icon TEXT NOT NULL,
-            color TEXT NOT NULL,
-            type TEXT NOT NULL,
-            budget_cents INTEGER,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            deleted_at TEXT,
-            PRIMARY KEY (id, profile_id),
-            FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS rules (
-            id TEXT NOT NULL,
-            profile_id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            priority INTEGER NOT NULL DEFAULT 20,
-            conditions TEXT NOT NULL,
-            apply_category TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            deleted_at TEXT,
-            PRIMARY KEY (id, profile_id),
-            FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS transactions (
-            id TEXT PRIMARY KEY,
-            legacy_id INTEGER,
-            profile_id TEXT NOT NULL,
-            date TEXT NOT NULL,
-            valuta_date TEXT,
-            amount_cents INTEGER NOT NULL,
-            currency TEXT NOT NULL DEFAULT 'EUR',
-            payee TEXT NOT NULL,
-            purpose TEXT NOT NULL,
-            raw_text TEXT NOT NULL,
-            type TEXT NOT NULL,
-            category TEXT NOT NULL,
-            subcategory TEXT,
-            account TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'booked',
-            source_hash TEXT NOT NULL,
-            imported_at TEXT NOT NULL,
-            is_manual INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            deleted_at TEXT,
-            FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_tx_profile_date ON transactions(profile_id, date);
-        CREATE INDEX IF NOT EXISTS idx_tx_hash ON transactions(profile_id, source_hash);
-        CREATE INDEX IF NOT EXISTS idx_tx_deleted ON transactions(deleted_at);
-
-        CREATE TABLE IF NOT EXISTS bank_templates (
-            id TEXT NOT NULL,
-            profile_id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            description TEXT NOT NULL,
-            encoding TEXT NOT NULL DEFAULT 'windows-1252',
-            delimiter TEXT NOT NULL DEFAULT ';',
-            header_identifier TEXT NOT NULL,
-            columns TEXT NOT NULL,
-            text_parser TEXT NOT NULL DEFAULT 'comdirect',
-            date_format TEXT NOT NULL DEFAULT 'DD.MM.YYYY',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            deleted_at TEXT,
-            PRIMARY KEY (id, profile_id),
-            FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS sync_queue (
-            record_type TEXT NOT NULL,
-            record_id TEXT NOT NULL,
-            operation TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            PRIMARY KEY (record_type, record_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS sync_state (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        );
-        """)
-    }
-
-    // MARK: - Defaults Seeding
-
-    private func seedDefaultsIfNeeded() {
-        let count = scalarInt("SELECT count(*) FROM profiles WHERE deleted_at IS NULL;")
-        if count == 0 {
-            let now = ISO8601DateFormatter().string(from: Date())
-            let defaultProfileId = "privat"
-
-            exec("""
-            INSERT OR IGNORE INTO profiles (id, name, icon, color, is_default, created_at, updated_at)
-            VALUES ('\(defaultProfileId)', 'Privat', 'User', '#0A84FF', 1, '\(now)', '\(now)');
-            """)
-
-            seedProfileDefaults(profileId: defaultProfileId)
-        }
-    }
-
-    public func seedProfileDefaults(profileId: String) {
-        let now = ISO8601DateFormatter().string(from: Date())
-
-        // Default Account
-        exec("""
-        INSERT OR IGNORE INTO accounts (id, profile_id, name, initial_balance_cents, initial_balance_date, created_at, updated_at)
-        VALUES ('comdirect', '\(profileId)', 'comdirect Girokonto', 0, '2026-01-01', '\(now)', '\(now)');
-        """)
-
-        // Default Categories
-        let categories: [(String, String, String, String, String)] = [
-            ("lebensmittel", "Lebensmittel & Supermarkt", "ShoppingCart", "#30D158", "expense"),
-            ("wohnen", "Wohnen & Miete", "Home", "#0A84FF", "expense"),
-            ("mobilitaet", "Mobilität & Transport", "Car", "#FF9F0A", "expense"),
-            ("freizeit", "Freizeit & Restaurant", "Utensils", "#FF375F", "expense"),
-            ("abos", "Abos & Verträge", "Smartphone", "#BF5AF2", "expense"),
-            ("shopping", "Shopping & Kleidung", "ShoppingBag", "#FFD60A", "expense"),
-            ("gesundheit", "Gesundheit & Pflege", "HeartPulse", "#64D2FF", "expense"),
-            ("investieren", "Sparen & Investieren", "TrendingUp", "#5E5CE6", "transfer"),
-            ("gehalt", "Gehalt & Einkommen", "Briefcase", "#32D74B", "income"),
-            ("rueckerstattung", "Rückerstattungen", "RotateCcw", "#40C8E0", "income"),
-            ("sonstiges", "Sonstiges", "Package", "#8E8E93", "expense")
-        ]
-
-        for cat in categories {
-            exec("""
-            INSERT OR IGNORE INTO categories (id, profile_id, name, icon, color, type, created_at, updated_at)
-            VALUES ('\(cat.0)', '\(profileId)', '\(cat.1)', '\(cat.2)', '\(cat.3)', '\(cat.4)', '\(now)', '\(now)');
-            """)
-        }
-
-        // Default Template
-        let cols = #"{"date":"Buchungstag","valutaDate":"Wertstellung (Valuta)","type":"Vorgang","rawText":"Buchungstext","amount":"Umsatz in EUR"}"#
-        exec("""
-        INSERT OR IGNORE INTO bank_templates (id, profile_id, name, description, encoding, delimiter, header_identifier, columns, text_parser, date_format, created_at, updated_at)
-        VALUES ('comdirect', '\(profileId)', 'comdirect Girokonto', 'Automatische Erkennung für comdirect CSV mit Windows-1252 & Textzerlegung', 'windows-1252', ';', 'Buchungstag', '\(cols)', 'comdirect', 'DD.MM.YYYY', '\(now)', '\(now)');
-        """)
-    }
-
-    // MARK: - Helper Methods
-
-    private func scalarInt(_ sql: String) -> Int {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
-        defer { sqlite3_finalize(stmt) }
-        if sqlite3_step(stmt) == SQLITE_ROW {
-            return Int(sqlite3_column_int(stmt, 0))
-        }
-        return 0
-    }
-
-    private func centsFromEuro(_ euro: Double) -> Int {
-        return Int((euro * 100.0).rounded())
-    }
-
-    private func euroFromCents(_ cents: Int) -> Double {
-        return Double(cents) / 100.0
-    }
-
-    private func nowISO() -> String {
-        return ISO8601DateFormatter().string(from: Date())
-    }
-
-    private func markDirty(type: String, id: String, op: String = "UPSERT") {
-        let now = nowISO()
-        exec("""
-        INSERT INTO sync_queue (record_type, record_id, operation, created_at)
-        VALUES ('\(type)', '\(id)', '\(op)', '\(now)')
-        ON CONFLICT(record_type, record_id) DO UPDATE SET operation = excluded.operation, created_at = excluded.created_at;
-        """)
-    }
-
-    // MARK: - Public Profiles API
-
-    public func getProfiles() -> [[String: Any]] {
-        return queue.sync {
-            var result = [[String: Any]]()
-            let sql = "SELECT id, name, icon, color, is_default, pin_hash, created_at FROM profiles WHERE deleted_at IS NULL ORDER BY is_default DESC, name ASC;"
-            var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                while sqlite3_step(stmt) == SQLITE_ROW {
-                    let id = String(cString: sqlite3_column_text(stmt, 0))
-                    let name = String(cString: sqlite3_column_text(stmt, 1))
-                    let icon = String(cString: sqlite3_column_text(stmt, 2))
-                    let color = String(cString: sqlite3_column_text(stmt, 3))
-                    let isDefault = sqlite3_column_int(stmt, 4) != 0
-                    let pinHash = sqlite3_column_text(stmt, 5) != nil ? String(cString: sqlite3_column_text(stmt, 5)) : nil
-                    let createdAt = String(cString: sqlite3_column_text(stmt, 6))
-
-                    result.append([
-                        "id": id,
-                        "name": name,
-                        "icon": icon,
-                        "color": color,
-                        "isDefault": isDefault,
-                        "hasPin": pinHash != nil && !pinHash!.isEmpty,
-                        "createdAt": createdAt
-                    ])
-                }
-            }
-            sqlite3_finalize(stmt)
+    public struct SyncRecord {
+        let recordID: String
+        let profileID: String
+        let kind: String
+        let id: String
+        let payload: [String: Any]
+        let revision: Int64
+        let changeID: String
+        let deletedAt: String?
+        let systemFields: Data?
+        let resolves: [String]
+        var envelope: [String: Any] {
+            var result: [String: Any] = ["schemaVersion": 2, "profileId": profileID, "kind": kind,
+                "id": id, "data": payload, "revision": revision, "changeId": changeID, "resolves": resolves]
+            if let deletedAt { result["deletedAt"] = deletedAt }
             return result
         }
     }
+    private final class SharedHolder: @unchecked Sendable {
+        let lock = NSLock()
+        var store: DagobertDatabase?
+    }
+    private static let holder = SharedHolder()
+    public static func sharedStore() throws -> DagobertDatabase {
+        holder.lock.lock(); defer { holder.lock.unlock() }
+        if let store = holder.store { return store }
+        let fm = FileManager.default
+        let parent = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            .appendingPathComponent("Dagobert", isDirectory: true)
+        try fm.createDirectory(at: parent, withIntermediateDirectories: true)
+        #if os(iOS)
+        try fm.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: parent.path)
+        #endif
+        let store = try DagobertDatabase(url: parent.appendingPathComponent("dagobert_local.sqlite"))
+        holder.store = store
+        return store
+    }
+    private var db: OpaquePointer?
+    private let lock = NSRecursiveLock()
+    private var depth = 0
+    public static let kinds = ["accounts", "categories", "rules", "transactions", "bankTemplates"]
+    private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-    public func createProfile(name: String, icon: String, color: String, pin: String?) -> [String: Any]? {
-        return queue.sync {
-            let id = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
-                .replacingOccurrences(of: " ", with: "-") + "-" + UUID().uuidString.prefix(4).lowercased()
-            let now = nowISO()
-            let pinHash = pin != nil && !pin!.isEmpty ? SecurityManager.shared.hashPin(pin!) : nil
-
-            var stmt: OpaquePointer?
-            let sql = "INSERT INTO profiles (id, name, icon, color, is_default, pin_hash, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?);"
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(stmt, 1, (id as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 2, (name as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 3, (icon as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 4, (color as NSString).utf8String, -1, nil)
-                if let ph = pinHash {
-                    sqlite3_bind_text(stmt, 5, (ph as NSString).utf8String, -1, nil)
-                } else {
-                    sqlite3_bind_null(stmt, 5)
-                }
-                sqlite3_bind_text(stmt, 6, (now as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 7, (now as NSString).utf8String, -1, nil)
-
-                if sqlite3_step(stmt) == SQLITE_DONE {
-                    sqlite3_finalize(stmt)
-                    seedProfileDefaults(profileId: id)
-                    markDirty(type: "Profile", id: id)
-                    return [
-                        "id": id,
-                        "name": name,
-                        "icon": icon,
-                        "color": color,
-                        "isDefault": false,
-                        "hasPin": pinHash != nil
-                    ]
-                }
+    public init(url: URL) throws {
+        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            if let db { sqlite3_close(db) }
+            db = nil
+            throw StoreError(message: "Die lokale Datenbank konnte nicht geöffnet werden. Deine Daten bleiben erhalten.")
+        }
+        do {
+            sqlite3_busy_timeout(db, 5000)
+            try execute("PRAGMA journal_mode = WAL")
+            try execute("PRAGMA foreign_keys = ON")
+            try execute("PRAGMA synchronous = FULL")
+            try execute("CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            try execute("CREATE TABLE IF NOT EXISTS record_scopes (id TEXT PRIMARY KEY)")
+            try execute("""
+                CREATE TABLE IF NOT EXISTS records (
+                    profile_id TEXT NOT NULL REFERENCES record_scopes(id), kind TEXT NOT NULL, id TEXT NOT NULL,
+                    record_id TEXT NOT NULL UNIQUE, payload TEXT NOT NULL CHECK(json_valid(payload)),
+                    amount_cents INTEGER, revision INTEGER NOT NULL, change_id TEXT NOT NULL, deleted_at TEXT,
+                    dirty INTEGER NOT NULL DEFAULT 1 CHECK(dirty IN (0,1)), seeded INTEGER NOT NULL DEFAULT 0, blocked INTEGER NOT NULL DEFAULT 0,
+                    system_fields BLOB, base_payload TEXT, resolves TEXT NOT NULL DEFAULT '[]', PRIMARY KEY(profile_id, kind, id)
+                )
+                """)
+            try execute("CREATE INDEX IF NOT EXISTS records_pending ON records(dirty, blocked)")
+            try execute("CREATE TABLE IF NOT EXISTS device_profile_pins (profile_id TEXT PRIMARY KEY, hash TEXT NOT NULL)")
+            try migrateLegacy()
+            #if os(iOS)
+            for path in [url.path, url.path + "-wal", url.path + "-shm"] where FileManager.default.fileExists(atPath: path) {
+                try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: path)
             }
-            sqlite3_finalize(stmt)
-            return nil
+            #endif
+        } catch {
+            sqlite3_close(db)
+            db = nil
+            throw error
         }
     }
+    deinit { if let db { sqlite3_close(db) } }
 
-    public func updateProfile(id: String, name: String?, icon: String?, color: String?, pin: String?, removePin: Bool) -> Bool {
-        return queue.sync {
-            let now = nowISO()
-            var pinHash: String? = nil
-            if !removePin, let p = pin, !p.isEmpty {
-                pinHash = SecurityManager.shared.hashPin(p)
-            }
-
-            var stmt: OpaquePointer?
-            let sql = """
-            UPDATE profiles
-            SET name = COALESCE(?, name),
-                icon = COALESCE(?, icon),
-                color = COALESCE(?, color),
-                pin_hash = CASE WHEN ? = 1 THEN NULL WHEN ? IS NOT NULL THEN ? ELSE pin_hash END,
-                updated_at = ?
-            WHERE id = ? AND deleted_at IS NULL;
-            """
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                if let n = name { sqlite3_bind_text(stmt, 1, (n as NSString).utf8String, -1, nil) } else { sqlite3_bind_null(stmt, 1) }
-                if let i = icon { sqlite3_bind_text(stmt, 2, (i as NSString).utf8String, -1, nil) } else { sqlite3_bind_null(stmt, 2) }
-                if let c = color { sqlite3_bind_text(stmt, 3, (c as NSString).utf8String, -1, nil) } else { sqlite3_bind_null(stmt, 3) }
-                sqlite3_bind_int(stmt, 4, removePin ? 1 : 0)
-                if let ph = pinHash {
-                    sqlite3_bind_text(stmt, 5, (ph as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(stmt, 6, (ph as NSString).utf8String, -1, nil)
-                } else {
-                    sqlite3_bind_null(stmt, 5)
-                    sqlite3_bind_null(stmt, 6)
+    // All SQL parameters are bound. Errors contain no statement, parameter, or bank data.
+    private func statement(_ sql: String, _ values: [Any?] = []) throws -> OpaquePointer {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            throw StoreError(message: "Datenbankabfrage fehlgeschlagen. Es wurden keine Daten übernommen.")
+        }
+        do {
+            for (offset, value) in values.enumerated() {
+                let index = Int32(offset + 1)
+                let code: Int32
+                switch value {
+                case nil, is NSNull: code = sqlite3_bind_null(stmt, index)
+                case let value as Data:
+                    code = value.withUnsafeBytes { sqlite3_bind_blob(stmt, index, $0.baseAddress, Int32(value.count), Self.transient) }
+                case let value as String: code = sqlite3_bind_text(stmt, index, value, -1, Self.transient)
+                case let value as Int64: code = sqlite3_bind_int64(stmt, index, value)
+                case let value as Int: code = sqlite3_bind_int64(stmt, index, Int64(value))
+                case let value as Double: code = sqlite3_bind_double(stmt, index, value)
+                default: throw StoreError(message: "Nicht unterstützter Datenbankwert.")
                 }
-                sqlite3_bind_text(stmt, 7, (now as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 8, (id as NSString).utf8String, -1, nil)
-
-                let ok = sqlite3_step(stmt) == SQLITE_DONE
-                sqlite3_finalize(stmt)
-                if ok {
-                    markDirty(type: "Profile", id: id)
-                }
-                return ok
+                guard code == SQLITE_OK else { throw StoreError(message: "Datenbankwert konnte nicht gespeichert werden.") }
             }
-            sqlite3_finalize(stmt)
-            return false
+        } catch { sqlite3_finalize(stmt); throw error }
+        return stmt
+    }
+    @discardableResult private func execute(_ sql: String, _ values: [Any?] = []) throws -> Int {
+        let stmt = try statement(sql, values)
+        defer { sqlite3_finalize(stmt) }
+        var code = sqlite3_step(stmt)
+        while code == SQLITE_ROW { code = sqlite3_step(stmt) }
+        guard code == SQLITE_DONE else { throw StoreError(message: "Speichern fehlgeschlagen. Der Vorgang wurde zurückgerollt.") }
+        return Int(sqlite3_changes(db))
+    }
+    private func rows(_ sql: String, _ values: [Any?] = []) throws -> [[String: Any]] {
+        let stmt = try statement(sql, values)
+        defer { sqlite3_finalize(stmt) }
+        var result = [[String: Any]]()
+        var code = sqlite3_step(stmt)
+        while code == SQLITE_ROW {
+            var row = [String: Any]()
+            for column in 0..<sqlite3_column_count(stmt) {
+                let name = String(cString: sqlite3_column_name(stmt, column))
+                switch sqlite3_column_type(stmt, column) {
+                case SQLITE_INTEGER: row[name] = sqlite3_column_int64(stmt, column)
+                case SQLITE_FLOAT: row[name] = sqlite3_column_double(stmt, column)
+                case SQLITE_TEXT: row[name] = String(cString: sqlite3_column_text(stmt, column))
+                case SQLITE_BLOB:
+                    if let pointer = sqlite3_column_blob(stmt, column) { row[name] = Data(bytes: pointer, count: Int(sqlite3_column_bytes(stmt, column))) }
+                default: row[name] = NSNull()
+                }
+            }
+            result.append(row)
+            code = sqlite3_step(stmt)
+        }
+        guard code == SQLITE_DONE else { throw StoreError(message: "Lesen der lokalen Daten fehlgeschlagen.") }
+        return result
+    }
+    public func transaction<T>(_ body: () throws -> T) throws -> T {
+        lock.lock(); defer { lock.unlock() }
+        if depth > 0 { return try body() }
+        try execute("BEGIN IMMEDIATE")
+        depth += 1
+        defer { depth -= 1 }
+        do { let value = try body(); try execute("COMMIT"); return value }
+        catch {
+            let original = error
+            do { try execute("ROLLBACK") }
+            catch { throw StoreError(message: "Datenbank konnte nicht sicher zurückgerollt werden. Bitte die App neu starten.") }
+            throw original
         }
     }
-
-    public func deleteProfile(id: String) -> Bool {
-        return queue.sync {
-            let total = scalarInt("SELECT count(*) FROM profiles WHERE deleted_at IS NULL;")
-            if total <= 1 { return false }
-
-            let now = nowISO()
-            exec("UPDATE profiles SET deleted_at = '\(now)', updated_at = '\(now)' WHERE id = '\(id)';")
-            markDirty(type: "Profile", id: id, op: "DELETE")
-            return true
+    public func metadata(_ key: String) throws -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return try rows("SELECT value FROM store_meta WHERE key = ?", [key]).first?["value"] as? String
+    }
+    public func setMetadata(_ key: String, _ value: String?) throws {
+        try transaction {
+            if try metadata(key) == value { return }
+            if let value { try execute("INSERT INTO store_meta(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [key, value]) }
+            else { try execute("DELETE FROM store_meta WHERE key = ?", [key]) }
         }
     }
-
-    public func unlockProfile(id: String, pin: String) -> Bool {
-        return queue.sync {
-            var stmt: OpaquePointer?
-            let sql = "SELECT pin_hash FROM profiles WHERE id = ? AND deleted_at IS NULL;"
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
-            defer { sqlite3_finalize(stmt) }
-            sqlite3_bind_text(stmt, 1, (id as NSString).utf8String, -1, nil)
-
-            if sqlite3_step(stmt) == SQLITE_ROW {
-                guard let phPtr = sqlite3_column_text(stmt, 0) else { return true }
-                let storedHash = String(cString: phPtr)
-                if storedHash.isEmpty { return true }
-                let checkHash = SecurityManager.shared.hashPin(pin)
-                return storedHash == checkHash
+    public static func json(_ value: Any) throws -> String {
+        guard JSONSerialization.isValidJSONObject(value), let text = String(data: try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), encoding: .utf8) else {
+            throw StoreError(message: "Ungültige JSON-Daten.")
+        }
+        return text
+    }
+    private static func object(_ text: String) throws -> [String: Any] {
+        guard let data = text.data(using: .utf8), let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw StoreError(message: "Gespeicherte Daten sind ungültig. Bitte ein Backup verwenden.")
+        }
+        return object
+    }
+    public static func stableIdentity(_ namespace: String, _ value: String) -> String {
+        var high: UInt64 = 0x6c62272e07bb0142, low: UInt64 = 0x62b821756295c58d
+        for byte in "\(namespace.utf16.count):\(namespace)\(value)".utf8 {
+            low ^= UInt64(byte)
+            let product = low.multipliedFullWidth(by: 315)
+            high = (high &* 315) &+ product.high &+ (low << 24)
+            low = product.low
+        }
+        var hex = Array(String(format: "%016llx%016llx", high, low))
+        hex[12] = "8"
+        let nibble = Int(String(hex[16]), radix: 16) ?? 0
+        hex[16] = Character(String((nibble & 3) | 8, radix: 16))
+        return [String(hex[0..<8]), String(hex[8..<12]), String(hex[12..<16]), String(hex[16..<20]), String(hex[20..<32])].joined(separator: "-")
+    }
+    public static func cents(_ value: Any?) throws -> Int64 {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else {
+            throw StoreError(message: "Ungültiger Geldbetrag.")
+        }
+        let scaled = number.doubleValue * 100
+        let rounded = scaled.rounded()
+        guard scaled.isFinite, abs(scaled - rounded) <= 0.000001, abs(rounded) <= 9_007_199_254_740_991 else {
+            throw StoreError(message: "Geldbetrag ist nicht als ganzer Centbetrag darstellbar.")
+        }
+        return Int64(rounded)
+    }
+    private static func canonicalMoney(_ kind: String, _ data: [String: Any]) throws -> [String: Any] {
+        var result = data
+        let fields = kind == "transactions" ? ["amount"] : kind == "accounts" ? ["initialBalance", "checkpointBalance"] : kind == "categories" ? ["budget"] : []
+        for field in fields {
+            if let value = result[field], !(value is NSNull) { result[field] = Double(try cents(value)) / 100 }
+        }
+        return result
+    }
+    private func decode(_ row: [String: Any]) throws -> SyncRecord {
+        guard let recordID = row["record_id"] as? String, let profileID = row["profile_id"] as? String,
+              let kind = row["kind"] as? String, let id = row["id"] as? String, let text = row["payload"] as? String,
+              let revision = row["revision"] as? Int64, let change = row["change_id"] as? String else {
+            throw StoreError(message: "Unvollständiger Datenbankeintrag.")
+        }
+        return try SyncRecord(recordID: recordID, profileID: profileID, kind: kind, id: id, payload: Self.object(text),
+            revision: revision, changeID: change, deletedAt: row["deleted_at"] as? String, systemFields: row["system_fields"] as? Data,
+            resolves: try JSONSerialization.jsonObject(with: Data((row["resolves"] as? String ?? "[]").utf8)) as? [String] ?? [])
+    }
+    private func find(_ profile: String, _ kind: String, _ id: String) throws -> SyncRecord? {
+        try rows("SELECT * FROM records WHERE profile_id=? AND kind=? AND id=?", [profile, kind, id]).first.map(decode)
+    }
+    public func record(_ recordID: String) throws -> SyncRecord? {
+        lock.lock(); defer { lock.unlock() }
+        return try rows("SELECT * FROM records WHERE record_id=?", [recordID]).first.map(decode)
+    }
+    public func records(_ profile: String? = nil, _ kind: String? = nil, includeDeleted: Bool = false) throws -> [SyncRecord] {
+        lock.lock(); defer { lock.unlock() }
+        var clauses = [String](), values = [Any?]()
+        if let profile { clauses.append("profile_id=?"); values.append(profile) }
+        if let kind { clauses.append("kind=?"); values.append(kind) }
+        if !includeDeleted { clauses.append("deleted_at IS NULL") }
+        return try rows("SELECT * FROM records" + (clauses.isEmpty ? "" : " WHERE " + clauses.joined(separator: " AND ")) + " ORDER BY kind,id", values).map(decode)
+    }
+    private func put(_ profile: String, _ kind: String, _ id: String, _ data: [String: Any], deletedAt: String? = nil, seeded: Bool = false) throws {
+        let data = try Self.canonicalMoney(kind, data)
+        let old = try find(profile, kind, id)
+        let text = try Self.json(data)
+        if let old, try Self.json(old.payload) == text && old.deletedAt == deletedAt { return }
+        let amount = kind == "transactions" ? try Self.cents(data["amount"]) : nil
+        try execute("INSERT OR IGNORE INTO record_scopes(id) VALUES (?)", [profile])
+        try execute("""
+            INSERT INTO records(profile_id,kind,id,record_id,payload,amount_cents,revision,change_id,deleted_at,dirty,seeded)
+            VALUES (?,?,?,?,?,?,?,?,?,1,?)
+            ON CONFLICT(profile_id,kind,id) DO UPDATE SET payload=excluded.payload,amount_cents=excluded.amount_cents,
+            revision=excluded.revision,change_id=excluded.change_id,deleted_at=excluded.deleted_at,dirty=1,seeded=excluded.seeded
+            """, [profile, kind, id, old?.recordID ?? Self.stableIdentity("record:\(profile):\(kind)", id), text,
+                    amount, (old?.revision ?? 0) + 1, UUID().uuidString.lowercased(), deletedAt, seeded ? 1 : 0])
+    }
+    public func requireProfile(_ id: String) throws {
+        guard let profile = try find(id, "profiles", id), profile.deletedAt == nil else { throw StoreError(message: "Profil nicht gefunden.") }
+    }
+    public func bootstrap(_ defaults: [String: Any]) throws {
+        try transaction {
+            try setMetadata("defaults", Self.json(defaults))
+            if try records(nil, "profiles").isEmpty {
+                try put("privat", "profiles", "privat", ["id": "privat", "name": "Privat", "icon": "User", "color": "#0A84FF", "isDefault": true, "createdAt": Self.now()], seeded: true)
+                try seed("privat")
             }
-            return false
         }
     }
-
-    // MARK: - Public Profile Data API
-
-    public func getProfileData(profileId: String) -> [String: Any]? {
-        return queue.sync {
-            // Profile
-            var profileDict: [String: Any]? = nil
-            var pStmt: OpaquePointer?
-            let pSql = "SELECT id, name, icon, color, is_default, pin_hash, created_at FROM profiles WHERE id = ? AND deleted_at IS NULL;"
-            if sqlite3_prepare_v2(db, pSql, -1, &pStmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(pStmt, 1, (profileId as NSString).utf8String, -1, nil)
-                if sqlite3_step(pStmt) == SQLITE_ROW {
-                    profileDict = [
-                        "id": String(cString: sqlite3_column_text(pStmt, 0)),
-                        "name": String(cString: sqlite3_column_text(pStmt, 1)),
-                        "icon": String(cString: sqlite3_column_text(pStmt, 2)),
-                        "color": String(cString: sqlite3_column_text(pStmt, 3)),
-                        "isDefault": sqlite3_column_int(pStmt, 4) != 0,
-                        "hasPin": sqlite3_column_text(pStmt, 5) != nil,
-                        "createdAt": String(cString: sqlite3_column_text(pStmt, 6))
-                    ]
-                }
+    private func seed(_ profile: String) throws {
+        guard let text = try metadata("defaults") else { throw StoreError(message: "Die App-Vorlagen fehlen. Bitte Dagobert neu öffnen.") }
+        let defaults = try Self.object(text)
+        for kind in Self.kinds {
+            for row in defaults[kind] as? [[String: Any]] ?? [] {
+                guard let id = row["id"] as? String else { throw StoreError(message: "Ungültige App-Vorlage.") }
+                try put(profile, kind, id, row, seeded: true)
             }
-            sqlite3_finalize(pStmt)
-            guard let profile = profileDict else { return nil }
-
-            // Accounts
-            var accounts = [[String: Any]]()
-            var aStmt: OpaquePointer?
-            let aSql = "SELECT id, name, iban, initial_balance_cents, initial_balance_date, checkpoint_balance_cents, checkpoint_date FROM accounts WHERE profile_id = ? AND deleted_at IS NULL;"
-            if sqlite3_prepare_v2(db, aSql, -1, &aStmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(aStmt, 1, (profileId as NSString).utf8String, -1, nil)
-                while sqlite3_step(aStmt) == SQLITE_ROW {
-                    let id = String(cString: sqlite3_column_text(aStmt, 0))
-                    let name = String(cString: sqlite3_column_text(aStmt, 1))
-                    let iban = sqlite3_column_text(aStmt, 2) != nil ? String(cString: sqlite3_column_text(aStmt, 2)) : nil
-                    let initCents = Int(sqlite3_column_int64(aStmt, 3))
-                    let initDate = String(cString: sqlite3_column_text(aStmt, 4))
-                    var chkBal: Double? = nil
-                    if sqlite3_column_type(aStmt, 5) != SQLITE_NULL {
-                        chkBal = euroFromCents(Int(sqlite3_column_int64(aStmt, 5)))
-                    }
-                    let chkDate = sqlite3_column_text(aStmt, 6) != nil ? String(cString: sqlite3_column_text(aStmt, 6)) : nil
-
-                    var accDict: [String: Any] = [
-                        "id": id,
-                        "name": name,
-                        "initialBalance": euroFromCents(initCents),
-                        "initialBalanceDate": initDate
-                    ]
-                    if let ib = iban { accDict["iban"] = ib }
-                    if let cb = chkBal { accDict["checkpointBalance"] = cb }
-                    if let cd = chkDate { accDict["checkpointDate"] = cd }
-                    accounts.append(accDict)
-                }
-            }
-            sqlite3_finalize(aStmt)
-
-            // Categories
-            var categories = [[String: Any]]()
-            var cStmt: OpaquePointer?
-            let cSql = "SELECT id, name, icon, color, type, budget_cents FROM categories WHERE profile_id = ? AND deleted_at IS NULL;"
-            if sqlite3_prepare_v2(db, cSql, -1, &cStmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(cStmt, 1, (profileId as NSString).utf8String, -1, nil)
-                while sqlite3_step(cStmt) == SQLITE_ROW {
-                    let id = String(cString: sqlite3_column_text(cStmt, 0))
-                    let name = String(cString: sqlite3_column_text(cStmt, 1))
-                    let icon = String(cString: sqlite3_column_text(cStmt, 2))
-                    let color = String(cString: sqlite3_column_text(cStmt, 3))
-                    let type = String(cString: sqlite3_column_text(cStmt, 4))
-                    var budget: Double? = nil
-                    if sqlite3_column_type(cStmt, 5) != SQLITE_NULL {
-                        budget = euroFromCents(Int(sqlite3_column_int64(cStmt, 5)))
-                    }
-
-                    var catDict: [String: Any] = [
-                        "id": id,
-                        "name": name,
-                        "icon": icon,
-                        "color": color,
-                        "type": type
-                    ]
-                    if let b = budget { catDict["budget"] = b }
-                    categories.append(catDict)
-                }
-            }
-            sqlite3_finalize(cStmt)
-
-            // Rules
-            var rules = [[String: Any]]()
-            var rStmt: OpaquePointer?
-            let rSql = "SELECT id, name, priority, conditions, apply_category, enabled FROM rules WHERE profile_id = ? AND deleted_at IS NULL ORDER BY priority ASC;"
-            if sqlite3_prepare_v2(db, rSql, -1, &rStmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(rStmt, 1, (profileId as NSString).utf8String, -1, nil)
-                while sqlite3_step(rStmt) == SQLITE_ROW {
-                    let id = String(cString: sqlite3_column_text(rStmt, 0))
-                    let name = String(cString: sqlite3_column_text(rStmt, 1))
-                    let priority = Int(sqlite3_column_int(rStmt, 2))
-                    let conditionsJson = String(cString: sqlite3_column_text(rStmt, 3))
-                    let applyCat = String(cString: sqlite3_column_text(rStmt, 4))
-                    let enabled = sqlite3_column_int(rStmt, 5) != 0
-
-                    let conditionsObj = (try? JSONSerialization.jsonObject(with: Data(conditionsJson.utf8))) ?? []
-
-                    rules.append([
-                        "id": id,
-                        "name": name,
-                        "priority": priority,
-                        "conditions": conditionsObj,
-                        "applyCategory": applyCat,
-                        "enabled": enabled
-                    ])
-                }
-            }
-            sqlite3_finalize(rStmt)
-
-            // Transactions
-            var transactions = [[String: Any]]()
-            var tStmt: OpaquePointer?
-            let tSql = """
-            SELECT id, legacy_id, date, valuta_date, amount_cents, currency, payee, purpose, raw_text, type, category, subcategory, account, status, source_hash, imported_at, is_manual
-            FROM transactions
-            WHERE profile_id = ? AND deleted_at IS NULL
-            ORDER BY date DESC;
-            """
-            if sqlite3_prepare_v2(db, tSql, -1, &tStmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(tStmt, 1, (profileId as NSString).utf8String, -1, nil)
-                while sqlite3_step(tStmt) == SQLITE_ROW {
-                    let id = String(cString: sqlite3_column_text(tStmt, 0))
-                    let date = String(cString: sqlite3_column_text(tStmt, 2))
-                    let valutaDate = sqlite3_column_text(tStmt, 3) != nil ? String(cString: sqlite3_column_text(tStmt, 3)) : nil
-                    let amountCents = Int(sqlite3_column_int64(tStmt, 4))
-                    let currency = String(cString: sqlite3_column_text(tStmt, 5))
-                    let payee = String(cString: sqlite3_column_text(tStmt, 6))
-                    let purpose = String(cString: sqlite3_column_text(tStmt, 7))
-                    let rawText = String(cString: sqlite3_column_text(tStmt, 8))
-                    let type = String(cString: sqlite3_column_text(tStmt, 9))
-                    let category = String(cString: sqlite3_column_text(tStmt, 10))
-                    let subcategory = sqlite3_column_text(tStmt, 11) != nil ? String(cString: sqlite3_column_text(tStmt, 11)) : nil
-                    let account = String(cString: sqlite3_column_text(tStmt, 12))
-                    let status = String(cString: sqlite3_column_text(tStmt, 13))
-                    let sourceHash = String(cString: sqlite3_column_text(tStmt, 14))
-                    let importedAt = String(cString: sqlite3_column_text(tStmt, 15))
-                    let isManual = sqlite3_column_int(tStmt, 16) != 0
-
-                    var txDict: [String: Any] = [
-                        "id": id,
-                        "date": date,
-                        "amount": euroFromCents(amountCents),
-                        "currency": currency,
-                        "payee": payee,
-                        "purpose": purpose,
-                        "rawText": rawText,
-                        "type": type,
-                        "category": category,
-                        "account": account,
-                        "status": status,
-                        "sourceHash": sourceHash,
-                        "importedAt": importedAt,
-                        "isManual": isManual
-                    ]
-                    if let vd = valutaDate { txDict["valutaDate"] = vd }
-                    if let sc = subcategory { txDict["subcategory"] = sc }
-                    transactions.append(txDict)
-                }
-            }
-            sqlite3_finalize(tStmt)
-
-            // Bank Templates
-            var templates = [[String: Any]]()
-            var btStmt: OpaquePointer?
-            let btSql = "SELECT id, name, description, encoding, delimiter, header_identifier, columns, text_parser, date_format FROM bank_templates WHERE profile_id = ? AND deleted_at IS NULL;"
-            if sqlite3_prepare_v2(db, btSql, -1, &btStmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(btStmt, 1, (profileId as NSString).utf8String, -1, nil)
-                while sqlite3_step(btStmt) == SQLITE_ROW {
-                    let id = String(cString: sqlite3_column_text(btStmt, 0))
-                    let name = String(cString: sqlite3_column_text(btStmt, 1))
-                    let desc = String(cString: sqlite3_column_text(btStmt, 2))
-                    let enc = String(cString: sqlite3_column_text(btStmt, 3))
-                    let delim = String(cString: sqlite3_column_text(btStmt, 4))
-                    let headerId = String(cString: sqlite3_column_text(btStmt, 5))
-                    let colsJson = String(cString: sqlite3_column_text(btStmt, 6))
-                    let textParser = String(cString: sqlite3_column_text(btStmt, 7))
-                    let dateFormat = String(cString: sqlite3_column_text(btStmt, 8))
-
-                    let colsObj = (try? JSONSerialization.jsonObject(with: Data(colsJson.utf8))) ?? [:]
-
-                    templates.append([
-                        "id": id,
-                        "name": name,
-                        "description": desc,
-                        "encoding": enc,
-                        "delimiter": delim,
-                        "headerIdentifier": headerId,
-                        "columns": colsObj,
-                        "textParser": textParser,
-                        "dateFormat": dateFormat
-                    ])
-                }
-            }
-            sqlite3_finalize(btStmt)
-
-            return [
-                "profile": profile,
-                "accounts": accounts,
-                "categories": categories,
-                "rules": rules,
-                "transactions": transactions,
-                "bankTemplates": templates
-            ]
         }
     }
-
-    // MARK: - Batch Import & Transactions
-
-    public func batchImportTransactions(profileId: String, transactions: [[String: Any]], accountCheckpoint: [String: Any]?) -> [String: Int] {
-        return queue.sync {
-            var inserted = 0
-            var updated = 0
-            var duplicates = 0
-
-            exec("BEGIN TRANSACTION;")
-
-            // 1. Account Checkpoint
-            if let cp = accountCheckpoint,
-               let newBalance = cp["newBalance"] as? Double {
-                let newBalCents = centsFromEuro(newBalance)
-                let endDate = cp["endDate"] as? String ?? cp["maxDate"] as? String
-                let iban = cp["iban"] as? String
-
-                var cpDate = endDate
-                if cpDate?.isEmpty ?? true {
-                    let dates = transactions.compactMap { $0["date"] as? String }
-                    cpDate = dates.max()
+    public static func now() -> String { ISO8601DateFormatter().string(from: Date()) }
+    public func profiles() throws -> [[String: Any]] {
+        try records(nil, "profiles").map { record in
+            var p = record.payload; p["hasPin"] = try pinHash(record.profileID) != nil; return p
+        }.sorted { (($0["isDefault"] as? Bool) == true ? 0 : 1, $0["name"] as? String ?? "") < (($1["isDefault"] as? Bool) == true ? 0 : 1, $1["name"] as? String ?? "") }
+    }
+    public func recoveryBackups() throws -> [[String: Any]] {
+        lock.lock(); defer { lock.unlock() }
+        return try rows("SELECT key,value FROM store_meta WHERE key LIKE 'recovery:%' ORDER BY key").map { row in
+            let payload = try Self.object(row["value"] as? String ?? "{}")
+            return ["id": row["key"] ?? "", "exportedAt": payload["exportedAt"] ?? "", "profileName": payload["profileName"] ?? ""]
+        }
+    }
+    public func pinHash(_ id: String) throws -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return try rows("SELECT hash FROM device_profile_pins WHERE profile_id=?", [id]).first?["hash"] as? String
+    }
+    public func setPinHash(_ id: String, _ hash: String?) throws {
+        _ = try transaction {
+            if let hash { try execute("INSERT INTO device_profile_pins(profile_id,hash) VALUES (?,?) ON CONFLICT(profile_id) DO UPDATE SET hash=excluded.hash", [id, hash]) }
+            else { try execute("DELETE FROM device_profile_pins WHERE profile_id=?", [id]) }
+        }
+    }
+    public func createProfile(_ name: String, icon: String, color: String, pinHash: String?) throws -> [String: Any] {
+        try transaction {
+            guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw StoreError(message: "Bitte einen Profilnamen eingeben.") }
+            let id = UUID().uuidString.lowercased()
+            let p: [String: Any] = ["id": id, "name": name, "icon": icon, "color": color, "isDefault": false, "createdAt": Self.now()]
+            try put(id, "profiles", id, p); try seed(id); try setPinHash(id, pinHash)
+            return p.merging(["hasPin": pinHash != nil]) { _, new in new }
+        }
+    }
+    public func updateProfile(_ id: String, _ changes: [String: Any]) throws {
+        try transaction {
+            try requireProfile(id)
+            var payload = try find(id, "profiles", id)!.payload
+            for key in ["name", "icon", "color"] { if let value = changes[key] as? String { payload[key] = key == "name" ? value.trimmingCharacters(in: .whitespacesAndNewlines) : value } }
+            if (payload["name"] as? String ?? "").count > 100 { throw StoreError(message: "Der Profilname darf höchstens 100 Zeichen enthalten.") }
+            if (payload["name"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw StoreError(message: "Bitte einen Profilnamen eingeben.") }
+            try put(id, "profiles", id, payload)
+        }
+    }
+    public func deleteProfile(_ id: String) throws {
+        try transaction {
+            guard try profiles().count > 1 else { throw StoreError(message: "Das letzte Profil kann nicht gelöscht werden.") }
+            for record in try records(id) { try put(id, record.kind, record.id, record.payload, deletedAt: Self.now()) }
+            try setPinHash(id, nil)
+        }
+    }
+    public func profileData(_ id: String) throws -> [String: Any] {
+        lock.lock(); defer { lock.unlock() }
+        try requireProfile(id)
+        var profile = try find(id, "profiles", id)!.payload
+        profile["hasPin"] = try pinHash(id) != nil
+        var result: [String: Any] = ["profile": profile]
+        for kind in Self.kinds { result[kind] = try records(id, kind).map(\.payload) }
+        return result
+    }
+    public func transactionProfile(_ id: String) throws -> String {
+        lock.lock(); defer { lock.unlock() }
+        guard let record = try rows("SELECT * FROM records WHERE kind='transactions' AND id=? AND deleted_at IS NULL", [id]).first else { throw StoreError(message: "Buchung nicht gefunden.") }
+        return try decode(record).profileID
+    }
+    public func saveEntity(_ profile: String, _ kind: String, _ data: [String: Any]) throws -> [String: Any] {
+        try transaction {
+            try requireProfile(profile)
+            guard Self.kinds.contains(kind) else { throw StoreError(message: "Unbekannter Datentyp.") }
+            var value = data
+            let portableID = data["syncId"] as? String ?? UUID().uuidString.lowercased()
+            let id = kind == "transactions" ? Self.stableIdentity("native-transaction:\(profile)", portableID) : (data["id"] as? String) ?? UUID().uuidString.lowercased()
+            value["id"] = id
+            if kind == "transactions" { value["syncId"] = portableID; value["importedAt"] = value["importedAt"] ?? Self.now() }
+            value = try Self.canonicalMoney(kind, value)
+            try validate(kind, value)
+            try put(profile, kind, id, value)
+            return value
+        }
+    }
+    public func editTransaction(_ id: String, _ changes: [String: Any]) throws {
+        try transaction {
+            let profile = try transactionProfile(id)
+            var value = try find(profile, "transactions", id)!.payload
+            for (key, newValue) in changes where !["id", "syncId", "profileId"].contains(key) { value[key] = newValue }
+            try validate("transactions", value)
+            try put(profile, "transactions", id, value)
+        }
+    }
+    public func deleteEntity(_ profile: String, _ kind: String, _ id: String) throws {
+        try transaction {
+            try requireProfile(profile)
+            guard let value = try find(profile, kind, id), value.deletedAt == nil else { return }
+            try put(profile, kind, id, value.payload, deletedAt: Self.now())
+            if kind == "categories" {
+                for record in try records(profile, "transactions") where record.payload["category"] as? String == id {
+                    var tx = record.payload; tx["category"] = "sonstiges"; try put(profile, "transactions", record.id, tx)
                 }
-                let resolvedCpDate = (cpDate?.isEmpty ?? true)
-                    ? ISO8601DateFormatter().string(from: Date()).prefix(10).description
-                    : cpDate!
-
-                let now = nowISO()
-                var cpStmt: OpaquePointer?
-                let cpSql = """
-                UPDATE accounts
-                SET checkpoint_balance_cents = ?,
-                    checkpoint_date = ?,
-                    iban = COALESCE(?, iban),
-                    updated_at = ?
-                WHERE id = 'comdirect' AND profile_id = ? AND deleted_at IS NULL;
-                """
-                if sqlite3_prepare_v2(db, cpSql, -1, &cpStmt, nil) == SQLITE_OK {
-                    sqlite3_bind_int64(cpStmt, 1, sqlite3_int64(newBalCents))
-                    sqlite3_bind_text(cpStmt, 2, (resolvedCpDate as NSString).utf8String, -1, nil)
-                    if let ib = iban { sqlite3_bind_text(cpStmt, 3, (ib as NSString).utf8String, -1, nil) } else { sqlite3_bind_null(cpStmt, 3) }
-                    sqlite3_bind_text(cpStmt, 4, (now as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(cpStmt, 5, (profileId as NSString).utf8String, -1, nil)
-                    sqlite3_step(cpStmt)
-                }
-                sqlite3_finalize(cpStmt)
-                markDirty(type: "Account", id: "comdirect")
             }
-
-            // 2. Fetch existing transactions to handle pending promotion & duplicate skipping
-            var existingBookedHashes = Set<String>()
-            var pendingMap = [String: [String]]() // key -> [id]
-
-            var exStmt: OpaquePointer?
-            let exSql = "SELECT id, date, amount_cents, payee, account, status, source_hash FROM transactions WHERE profile_id = ? AND deleted_at IS NULL;"
-            if sqlite3_prepare_v2(db, exSql, -1, &exStmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(exStmt, 1, (profileId as NSString).utf8String, -1, nil)
-                while sqlite3_step(exStmt) == SQLITE_ROW {
-                    let id = String(cString: sqlite3_column_text(exStmt, 0))
-                    let date = String(cString: sqlite3_column_text(exStmt, 1))
-                    let amountCents = Int(sqlite3_column_int64(exStmt, 2))
-                    let payee = String(cString: sqlite3_column_text(exStmt, 3))
-                    let account = String(cString: sqlite3_column_text(exStmt, 4))
-                    let status = String(cString: sqlite3_column_text(exStmt, 5))
-                    let hash = String(cString: sqlite3_column_text(exStmt, 6))
-
-                    if status == "booked" {
-                        existingBookedHashes.insert(hash)
-                    } else if status == "pending" {
-                        let euroStr = String(format: "%.2f", euroFromCents(amountCents))
-                        let key = "\(date)|\(euroStr)|\(payee.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())|\(account)"
-                        var list = pendingMap[key] ?? []
-                        list.append(id)
-                        pendingMap[key] = list
-                    }
-                }
+        }
+    }
+    public func updateAccount(_ profile: String, _ id: String, _ changes: [String: Any]) throws {
+        try transaction {
+            try requireProfile(profile)
+            guard var value = try find(profile, "accounts", id)?.payload else { throw StoreError(message: "Konto nicht gefunden.") }
+            for key in ["initialBalance", "initialBalanceDate", "checkpointBalance", "checkpointDate", "iban"] {
+                if let change = changes[key] { value[key] = change }
             }
-            sqlite3_finalize(exStmt)
-
-            // Prepared statements for loop
-            var insStmt: OpaquePointer?
-            let insSql = """
-            INSERT INTO transactions (
-                id, profile_id, date, valuta_date, amount_cents, currency, payee, purpose, raw_text, type, category, account, status, source_hash, imported_at, is_manual, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """
-            sqlite3_prepare_v2(db, insSql, -1, &insStmt, nil)
-
-            var updStmt: OpaquePointer?
-            let updSql = "UPDATE transactions SET status = 'booked', raw_text = ?, type = ?, source_hash = ?, updated_at = ? WHERE id = ?;"
-            sqlite3_prepare_v2(db, updSql, -1, &updStmt, nil)
-
-            let now = nowISO()
-
-            for t in transactions {
-                guard let date = t["date"] as? String,
-                      let amount = t["amount"] as? Double,
-                      let hash = t["sourceHash"] as? String else { continue }
-
-                if existingBookedHashes.contains(hash) {
-                    duplicates += 1
-                    continue
+            try validate("accounts", value); try put(profile, "accounts", id, value)
+        }
+    }
+    public func importRulesPackage(_ profile: String, categories: [[String: Any]], rules: [[String: Any]],
+                                   expectedCategories: [[String: Any]], expectedRules: [[String: Any]]) throws -> [String: Int] {
+        try transaction {
+            try requireProfile(profile)
+            func canonical(_ values: [[String: Any]]) throws -> String {
+                try Self.json(values.sorted { ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "") })
+            }
+            let currentCategories = try records(profile, "categories").map(\.payload)
+            let currentRules = try records(profile, "rules").map(\.payload)
+            guard try canonical(currentCategories) == canonical(expectedCategories), try canonical(currentRules) == canonical(expectedRules) else {
+                throw StoreError(message: "Regeln oder Kategorien wurden zwischenzeitlich geändert. Bitte den Import erneut öffnen.")
+            }
+            var categoryIDs = Set(currentCategories.compactMap { $0["id"] as? String })
+            var ruleIDs = Set(currentRules.compactMap { $0["id"] as? String })
+            for category in categories {
+                guard let id = category["id"] as? String, !id.isEmpty, !categoryIDs.contains(id),
+                      let name = category["name"] as? String, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      category["icon"] is String, category["color"] is String,
+                      ["expense", "income", "transfer"].contains(category["type"] as? String ?? "") else {
+                    throw StoreError(message: "Ungültige oder bereits vorhandene Kategorie. Nichts verändert.")
                 }
-
-                let accountName = (t["account"] as? String) ?? "comdirect Girokonto"
-                let payee = (t["payee"] as? String) ?? "Unbekannt"
-                let status = (t["status"] as? String) ?? "booked"
-                let euroStr = String(format: "%.2f", amount)
-                let pendingKey = "\(date)|\(euroStr)|\(payee.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())|\(accountName)"
-
-                if var list = pendingMap[pendingKey], !list.isEmpty, status == "booked" {
-                    let targetId = list.removeFirst()
-                    pendingMap[pendingKey] = list
-
-                    sqlite3_reset(updStmt)
-                    sqlite3_bind_text(updStmt, 1, ((t["rawText"] as? String ?? "") as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(updStmt, 2, ((t["type"] as? String ?? "") as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(updStmt, 3, (hash as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(updStmt, 4, (now as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(updStmt, 5, (targetId as NSString).utf8String, -1, nil)
-                    sqlite3_step(updStmt)
-
-                    existingBookedHashes.insert(hash)
-                    markDirty(type: "Transaction", id: targetId)
+                categoryIDs.insert(id)
+                _ = try saveEntity(profile, "categories", category)
+            }
+            for rule in rules {
+                guard let id = rule["id"] as? String, !id.isEmpty, !ruleIDs.contains(id),
+                      rule["name"] is String, let category = rule["applyCategory"] as? String, categoryIDs.contains(category),
+                      let conditions = rule["conditions"] as? [[String: Any]], !conditions.isEmpty else {
+                    throw StoreError(message: "Ungültige oder bereits vorhandene Regel. Nichts verändert.")
+                }
+                ruleIDs.insert(id)
+                _ = try saveEntity(profile, "rules", rule)
+            }
+            return ["categoriesAdded": categories.count, "rulesAdded": rules.count]
+        }
+    }
+    public func loadStandardRules(_ profile: String, _ rules: [[String: Any]]) throws -> [String: Int] {
+        try transaction {
+            var inserted = 0, updated = 0
+            for rule in rules {
+                guard let id = rule["id"] as? String else { throw StoreError(message: "Ungültige Standardregel.") }
+                var merged = rule
+                if let old = try find(profile, "rules", id), old.deletedAt == nil {
+                    merged["enabled"] = old.payload["enabled"] ?? true
+                    if try Self.json(merged) == Self.json(old.payload) { continue }
                     updated += 1
-                } else {
-                    let txId = (t["id"] as? String) ?? UUID().uuidString
-                    let amountCents = centsFromEuro(amount)
-
-                    sqlite3_reset(insStmt)
-                    sqlite3_bind_text(insStmt, 1, (txId as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 2, (profileId as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 3, (date as NSString).utf8String, -1, nil)
-                    if let vd = t["valutaDate"] as? String { sqlite3_bind_text(insStmt, 4, (vd as NSString).utf8String, -1, nil) } else { sqlite3_bind_null(insStmt, 4) }
-                    sqlite3_bind_int64(insStmt, 5, sqlite3_int64(amountCents))
-                    sqlite3_bind_text(insStmt, 6, ((t["currency"] as? String ?? "EUR") as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 7, (payee as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 8, ((t["purpose"] as? String ?? "") as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 9, ((t["rawText"] as? String ?? "") as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 10, ((t["type"] as? String ?? "") as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 11, ((t["category"] as? String ?? "sonstiges") as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 12, (accountName as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 13, (status as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 14, (hash as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 15, ((t["importedAt"] as? String ?? now) as NSString).utf8String, -1, nil)
-                    sqlite3_bind_int(insStmt, 16, (t["isManual"] as? Bool == true) ? 1 : 0)
-                    sqlite3_bind_text(insStmt, 17, (now as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 18, (now as NSString).utf8String, -1, nil)
-
-                    if sqlite3_step(insStmt) == SQLITE_DONE {
-                        existingBookedHashes.insert(hash)
-                        markDirty(type: "Transaction", id: txId)
-                        inserted += 1
-                    }
-                }
-            }
-
-            sqlite3_finalize(insStmt)
-            sqlite3_finalize(updStmt)
-            exec("COMMIT;")
-
-            return ["inserted": inserted, "updated": updated, "duplicates": duplicates]
-        }
-    }
-
-    public func createManualTransaction(profileId: String, transaction: [String: Any]) -> String? {
-        return queue.sync {
-            let txId = UUID().uuidString
-            let now = nowISO()
-            let amount = (transaction["amount"] as? Double) ?? 0.0
-            let amountCents = centsFromEuro(amount)
-            let date = (transaction["date"] as? String) ?? now.prefix(10).description
-            let hash = (transaction["sourceHash"] as? String) ?? "man_\(UUID().uuidString)"
-
-            var stmt: OpaquePointer?
-            let sql = """
-            INSERT INTO transactions (
-                id, profile_id, date, valuta_date, amount_cents, currency, payee, purpose, raw_text, type, category, account, status, source_hash, imported_at, is_manual, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?);
-            """
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(stmt, 1, (txId as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 2, (profileId as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 3, (date as NSString).utf8String, -1, nil)
-                if let vd = transaction["valutaDate"] as? String { sqlite3_bind_text(stmt, 4, (vd as NSString).utf8String, -1, nil) } else { sqlite3_bind_null(stmt, 4) }
-                sqlite3_bind_int64(stmt, 5, sqlite3_int64(amountCents))
-                sqlite3_bind_text(stmt, 6, ((transaction["currency"] as? String ?? "EUR") as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 7, ((transaction["payee"] as? String ?? "Manuell") as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 8, ((transaction["purpose"] as? String ?? "") as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 9, ((transaction["rawText"] as? String ?? "Manuelle Buchung") as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 10, ((transaction["type"] as? String ?? "Barzahlung") as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 11, ((transaction["category"] as? String ?? "sonstiges") as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 12, ((transaction["account"] as? String ?? "Girokonto") as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 13, ((transaction["status"] as? String ?? "booked") as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 14, (hash as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 15, (now as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 16, (now as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 17, (now as NSString).utf8String, -1, nil)
-
-                if sqlite3_step(stmt) == SQLITE_DONE {
-                    sqlite3_finalize(stmt)
-                    markDirty(type: "Transaction", id: txId)
-                    return txId
-                }
-            }
-            sqlite3_finalize(stmt)
-            return nil
-        }
-    }
-
-    public func updateTransaction(id: String, transaction: [String: Any]) -> Bool {
-        return queue.sync {
-            let now = nowISO()
-            var fields = [String]()
-            var args = [Any]()
-
-            if let date = transaction["date"] as? String {
-                fields.append("date = ?")
-                args.append(date)
-            }
-            if let amount = transaction["amount"] as? Double {
-                fields.append("amount_cents = ?")
-                args.append(centsFromEuro(amount))
-            }
-            if let payee = transaction["payee"] as? String {
-                fields.append("payee = ?")
-                args.append(payee)
-            }
-            if let purpose = transaction["purpose"] as? String {
-                fields.append("purpose = ?")
-                args.append(purpose)
-            }
-            if let category = transaction["category"] as? String {
-                fields.append("category = ?")
-                args.append(category)
-            }
-            if let account = transaction["account"] as? String {
-                fields.append("account = ?")
-                args.append(account)
-            }
-            if let status = transaction["status"] as? String {
-                fields.append("status = ?")
-                args.append(status)
-            }
-
-            guard !fields.isEmpty else { return true }
-            fields.append("updated_at = ?")
-            args.append(now)
-
-            let sql = "UPDATE transactions SET \(fields.joined(separator: ", ")) WHERE id = ? AND deleted_at IS NULL;"
-            var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                var idx: Int32 = 1
-                for arg in args {
-                    if let str = arg as? String {
-                        sqlite3_bind_text(stmt, idx, (str as NSString).utf8String, -1, nil)
-                    } else if let intVal = arg as? Int {
-                        sqlite3_bind_int64(stmt, idx, sqlite3_int64(intVal))
-                    }
-                    idx += 1
-                }
-                sqlite3_bind_text(stmt, idx, (id as NSString).utf8String, -1, nil)
-
-                let ok = sqlite3_step(stmt) == SQLITE_DONE
-                sqlite3_finalize(stmt)
-                if ok {
-                    markDirty(type: "Transaction", id: id)
-                }
-                return ok
-            }
-            sqlite3_finalize(stmt)
-            return false
-        }
-    }
-
-    public func deleteTransaction(id: String) -> Bool {
-        return queue.sync {
-            let now = nowISO()
-            exec("UPDATE transactions SET deleted_at = '\(now)', updated_at = '\(now)' WHERE id = '\(id)';")
-            markDirty(type: "Transaction", id: id, op: "DELETE")
-            return true
-        }
-    }
-
-    // MARK: - Account Settings
-
-    public func updateAccountSettings(profileId: String, id: String, initialBalance: Double?, initialBalanceDate: String?, checkpointBalance: Double?, checkpointDate: String?) -> Bool {
-        return queue.sync {
-            let now = nowISO()
-            var fields = ["updated_at = ?"]
-            var args: [Any] = [now]
-
-            if let ib = initialBalance {
-                fields.append("initial_balance_cents = ?")
-                args.append(centsFromEuro(ib))
-            }
-            if let ibd = initialBalanceDate {
-                fields.append("initial_balance_date = ?")
-                args.append(ibd)
-            }
-            if let cb = checkpointBalance {
-                fields.append("checkpoint_balance_cents = ?")
-                args.append(centsFromEuro(cb))
-            }
-            if let cd = checkpointDate {
-                fields.append("checkpoint_date = ?")
-                args.append(cd)
-            }
-
-            let sql = "UPDATE accounts SET \(fields.joined(separator: ", ")) WHERE id = ? AND profile_id = ? AND deleted_at IS NULL;"
-            var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                var idx: Int32 = 1
-                for arg in args {
-                    if let str = arg as? String {
-                        sqlite3_bind_text(stmt, idx, (str as NSString).utf8String, -1, nil)
-                    } else if let intVal = arg as? Int {
-                        sqlite3_bind_int64(stmt, idx, sqlite3_int64(intVal))
-                    }
-                    idx += 1
-                }
-                sqlite3_bind_text(stmt, idx, (id as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, idx + 1, (profileId as NSString).utf8String, -1, nil)
-
-                let ok = sqlite3_step(stmt) == SQLITE_DONE
-                sqlite3_finalize(stmt)
-                if ok {
-                    markDirty(type: "Account", id: id)
-                }
-                return ok
-            }
-            sqlite3_finalize(stmt)
-            return false
-        }
-    }
-
-    // MARK: - Categories & Rules
-
-    public func createCategory(profileId: String, category: [String: Any]) -> [String: Any]? {
-        return queue.sync {
-            let id = (category["id"] as? String) ?? UUID().uuidString.prefix(8).lowercased().description
-            let name = (category["name"] as? String) ?? "Neue Kategorie"
-            let icon = (category["icon"] as? String) ?? "Package"
-            let color = (category["color"] as? String) ?? "#8E8E93"
-            let type = (category["type"] as? String) ?? "expense"
-            let budget = category["budget"] as? Double
-            let budgetCents = budget != nil ? centsFromEuro(budget!) : nil
-            let now = nowISO()
-
-            var stmt: OpaquePointer?
-            let sql = """
-            INSERT INTO categories (id, profile_id, name, icon, color, type, budget_cents, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id, profile_id) DO UPDATE SET name = excluded.name, icon = excluded.icon, color = excluded.color, type = excluded.type, budget_cents = excluded.budget_cents, updated_at = excluded.updated_at, deleted_at = NULL;
-            """
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(stmt, 1, (id as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 2, (profileId as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 3, (name as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 4, (icon as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 5, (color as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 6, (type as NSString).utf8String, -1, nil)
-                if let bc = budgetCents { sqlite3_bind_int64(stmt, 7, sqlite3_int64(bc)) } else { sqlite3_bind_null(stmt, 7) }
-                sqlite3_bind_text(stmt, 8, (now as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 9, (now as NSString).utf8String, -1, nil)
-
-                if sqlite3_step(stmt) == SQLITE_DONE {
-                    sqlite3_finalize(stmt)
-                    markDirty(type: "Category", id: id)
-                    return [
-                        "id": id,
-                        "name": name,
-                        "icon": icon,
-                        "color": color,
-                        "type": type,
-                        "budget": budget as Any
-                    ]
-                }
-            }
-            sqlite3_finalize(stmt)
-            return nil
-        }
-    }
-
-    public func deleteCategory(profileId: String, id: String) -> Bool {
-        return queue.sync {
-            let now = nowISO()
-            exec("UPDATE categories SET deleted_at = '\(now)', updated_at = '\(now)' WHERE id = '\(id)' AND profile_id = '\(profileId)';")
-            // Re-assign transactions belonging to this category to 'sonstiges'
-            exec("UPDATE transactions SET category = 'sonstiges', updated_at = '\(now)' WHERE category = '\(id)' AND profile_id = '\(profileId)' AND deleted_at IS NULL;")
-            markDirty(type: "Category", id: id, op: "DELETE")
-            return true
-        }
-    }
-
-    public func createRule(profileId: String, rule: [String: Any]) -> Bool {
-        return queue.sync {
-            let id = (rule["id"] as? String) ?? UUID().uuidString
-            let name = (rule["name"] as? String) ?? "Neue Regel"
-            let priority = (rule["priority"] as? Int) ?? 20
-            let applyCat = (rule["applyCategory"] as? String) ?? "sonstiges"
-            let enabled = (rule["enabled"] as? Bool) ?? true
-            let condObj = rule["conditions"] ?? []
-            let condData = (try? JSONSerialization.data(withJSONObject: condObj)) ?? Data("[]".utf8)
-            let condJson = String(data: condData, encoding: .utf8) ?? "[]"
-            let now = nowISO()
-
-            var stmt: OpaquePointer?
-            let sql = """
-            INSERT INTO rules (id, profile_id, name, priority, conditions, apply_category, enabled, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id, profile_id) DO UPDATE SET name = excluded.name, priority = excluded.priority, conditions = excluded.conditions, apply_category = excluded.apply_category, enabled = excluded.enabled, updated_at = excluded.updated_at, deleted_at = NULL;
-            """
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(stmt, 1, (id as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 2, (profileId as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 3, (name as NSString).utf8String, -1, nil)
-                sqlite3_bind_int(stmt, 4, Int32(priority))
-                sqlite3_bind_text(stmt, 5, (condJson as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 6, (applyCat as NSString).utf8String, -1, nil)
-                sqlite3_bind_int(stmt, 7, enabled ? 1 : 0)
-                sqlite3_bind_text(stmt, 8, (now as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 9, (now as NSString).utf8String, -1, nil)
-
-                let ok = sqlite3_step(stmt) == SQLITE_DONE
-                sqlite3_finalize(stmt)
-                if ok {
-                    markDirty(type: "Rule", id: id)
-                }
-                return ok
-            }
-            sqlite3_finalize(stmt)
-            return false
-        }
-    }
-
-    public func deleteRule(profileId: String, id: String) -> Bool {
-        return queue.sync {
-            let now = nowISO()
-            exec("UPDATE rules SET deleted_at = '\(now)', updated_at = '\(now)' WHERE id = '\(id)' AND profile_id = '\(profileId)';")
-            markDirty(type: "Rule", id: id, op: "DELETE")
-            return true
-        }
-    }
-
-    public func loadStandardRules(profileId: String, standardRulesJson: String) -> [String: Int] {
-        return queue.sync {
-            guard let data = standardRulesJson.data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let rulesList = obj["rules"] as? [[String: Any]] else {
-                return ["inserted": 0, "updated": 0]
-            }
-
-            var inserted = 0
-            var updated = 0
-            let now = nowISO()
-
-            for r in rulesList {
-                guard let id = r["id"] as? String,
-                      let name = r["name"] as? String,
-                      let priority = r["priority"] as? Int,
-                      let applyCat = r["applyCategory"] as? String else { continue }
-
-                let conditions = r["conditions"] ?? []
-                let condData = (try? JSONSerialization.data(withJSONObject: conditions)) ?? Data("[]".utf8)
-                let condJson = String(data: condData, encoding: .utf8) ?? "[]"
-
-                let exists = scalarInt("SELECT count(*) FROM rules WHERE id = '\(id)' AND profile_id = '\(profileId)' AND deleted_at IS NULL;")
-                if exists == 0 {
-                    exec("""
-                    INSERT INTO rules (id, profile_id, name, priority, conditions, apply_category, enabled, created_at, updated_at)
-                    VALUES ('\(id)', '\(profileId)', '\(name)', \(priority), '\(condJson)', '\(applyCat)', 1, '\(now)', '\(now)');
-                    """)
-                    markDirty(type: "Rule", id: id)
-                    inserted += 1
-                } else {
-                    // Update definition
-                    exec("""
-                    UPDATE rules SET name = '\(name)', priority = \(priority), conditions = '\(condJson)', apply_category = '\(applyCat)', updated_at = '\(now)'
-                    WHERE id = '\(id)' AND profile_id = '\(profileId)';
-                    """)
-                    markDirty(type: "Rule", id: id)
-                    updated += 1
-                }
+                } else { inserted += 1 }
+                _ = try saveEntity(profile, "rules", merged)
             }
             return ["inserted": inserted, "updated": updated]
         }
     }
-
-    // MARK: - Restore & Reset
-
-    public func importProfileBackup(profileId: String, payload: [String: Any], mode: String = "replace") -> Bool {
-        return queue.sync {
-            exec("BEGIN TRANSACTION;")
-
-            let now = nowISO()
-
-            if mode == "replace" {
-                // Delete active records for this profile
-                exec("UPDATE transactions SET deleted_at = '\(now)', updated_at = '\(now)' WHERE profile_id = '\(profileId)' AND deleted_at IS NULL;")
-                exec("UPDATE rules SET deleted_at = '\(now)', updated_at = '\(now)' WHERE profile_id = '\(profileId)' AND deleted_at IS NULL;")
-                exec("UPDATE categories SET deleted_at = '\(now)', updated_at = '\(now)' WHERE profile_id = '\(profileId)' AND deleted_at IS NULL;")
-                exec("UPDATE bank_templates SET deleted_at = '\(now)', updated_at = '\(now)' WHERE profile_id = '\(profileId)' AND deleted_at IS NULL;")
-            }
-
-            // Import Accounts
-            if let accounts = payload["accounts"] as? [[String: Any]] {
-                for a in accounts {
-                    let id = (a["id"] as? String) ?? "comdirect"
-                    let name = (a["name"] as? String) ?? "Girokonto"
-                    let iban = a["iban"] as? String
-                    let initBal = (a["initialBalance"] as? Double) ?? 0.0
-                    let initCents = centsFromEuro(initBal)
-                    let initDate = (a["initialBalanceDate"] as? String) ?? "2026-01-01"
-                    let chkBal = a["checkpointBalance"] as? Double
-                    let chkCents = chkBal != nil ? centsFromEuro(chkBal!) : nil
-                    let chkDate = a["checkpointDate"] as? String
-
-                    var stmt: OpaquePointer?
-                    let sql = """
-                    INSERT INTO accounts (id, profile_id, name, iban, initial_balance_cents, initial_balance_date, checkpoint_balance_cents, checkpoint_date, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id, profile_id) DO UPDATE SET
-                        name = excluded.name,
-                        iban = excluded.iban,
-                        initial_balance_cents = excluded.initial_balance_cents,
-                        initial_balance_date = excluded.initial_balance_date,
-                        checkpoint_balance_cents = excluded.checkpoint_balance_cents,
-                        checkpoint_date = excluded.checkpoint_date,
-                        updated_at = excluded.updated_at,
-                        deleted_at = NULL;
-                    """
-                    if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                        sqlite3_bind_text(stmt, 1, (id as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 2, (profileId as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 3, (name as NSString).utf8String, -1, nil)
-                        if let ib = iban { sqlite3_bind_text(stmt, 4, (ib as NSString).utf8String, -1, nil) } else { sqlite3_bind_null(stmt, 4) }
-                        sqlite3_bind_int64(stmt, 5, sqlite3_int64(initCents))
-                        sqlite3_bind_text(stmt, 6, (initDate as NSString).utf8String, -1, nil)
-                        if let cc = chkCents { sqlite3_bind_int64(stmt, 7, sqlite3_int64(cc)) } else { sqlite3_bind_null(stmt, 7) }
-                        if let cd = chkDate { sqlite3_bind_text(stmt, 8, (cd as NSString).utf8String, -1, nil) } else { sqlite3_bind_null(stmt, 8) }
-                        sqlite3_bind_text(stmt, 9, (now as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 10, (now as NSString).utf8String, -1, nil)
-                        sqlite3_step(stmt)
+    public func batchImport(_ profile: String, _ items: [[String: Any]], _ checkpoint: [String: Any]?, appendOnly: Bool = false, reviewedHashes: Set<String> = []) throws -> [String: Int] {
+        try transaction {
+            try requireProfile(profile)
+            var inserted = 0, updated = 0, duplicates = 0
+            let existing = try records(profile, "transactions")
+            if appendOnly {
+                for value in items {
+                    guard let date = value["date"] as? String, let account = value["account"] as? String,
+                          let hash = value["sourceHash"] as? String else { throw StoreError(message: "Ungültige Bankbuchung.") }
+                    if existing.contains(where: { $0.payload["account"] as? String == account && $0.payload["sourceHash"] as? String == hash }) { continue }
+                    let historical = existing.contains { old in
+                        old.payload["account"] as? String == account && (old.payload["date"] as? String ?? "") >= date &&
+                        !(old.payload["sourceHash"] as? String ?? "").hasPrefix("comdirect_api_") && old.payload["isManual"] as? Bool != true
                     }
-                    sqlite3_finalize(stmt)
-                    markDirty(type: "Account", id: id)
+                    if historical && !reviewedHashes.contains(hash) { throw StoreError(message: "Historische Überschneidung noch nicht geprüft. Bitte die Vorschau erneut abrufen.") }
                 }
-            }
-
-            // Import Categories
-            if let categories = payload["categories"] as? [[String: Any]] {
-                for c in categories {
-                    let id = (c["id"] as? String) ?? UUID().uuidString
-                    let name = (c["name"] as? String) ?? "Kategorie"
-                    let icon = (c["icon"] as? String) ?? "Package"
-                    let color = (c["color"] as? String) ?? "#8E8E93"
-                    let type = (c["type"] as? String) ?? "expense"
-                    let budget = c["budget"] as? Double
-                    let budgetCents = budget != nil ? centsFromEuro(budget!) : nil
-
-                    var stmt: OpaquePointer?
-                    let sql = """
-                    INSERT INTO categories (id, profile_id, name, icon, color, type, budget_cents, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id, profile_id) DO UPDATE SET
-                        name = excluded.name,
-                        icon = excluded.icon,
-                        color = excluded.color,
-                        type = excluded.type,
-                        budget_cents = excluded.budget_cents,
-                        updated_at = excluded.updated_at,
-                        deleted_at = NULL;
-                    """
-                    if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                        sqlite3_bind_text(stmt, 1, (id as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 2, (profileId as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 3, (name as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 4, (icon as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 5, (color as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 6, (type as NSString).utf8String, -1, nil)
-                        if let bc = budgetCents { sqlite3_bind_int64(stmt, 7, sqlite3_int64(bc)) } else { sqlite3_bind_null(stmt, 7) }
-                        sqlite3_bind_text(stmt, 8, (now as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 9, (now as NSString).utf8String, -1, nil)
-                        sqlite3_step(stmt)
+                var linked = [String: String]()
+                var targets = [String: String]()
+                for value in existing.map({ $0.payload }) + items {
+                    guard let hash = value["sourceHash"] as? String, hash.hasPrefix("comdirect_api_") else { continue }
+                    guard let data = String(hash.dropFirst("comdirect_api_".count)).data(using: .utf8),
+                          let reference = try JSONSerialization.jsonObject(with: data) as? [String], reference.count == 2,
+                          !reference[0].isEmpty, !reference[1].isEmpty, let account = value["account"] as? String else {
+                        throw StoreError(message: "Ungültige Bankreferenz. Nichts gespeichert.")
                     }
-                    sqlite3_finalize(stmt)
-                    markDirty(type: "Category", id: id)
+                    if let previous = linked[reference[0]], previous != account { throw StoreError(message: "Dieses Bankkonto ist bereits einem anderen Zielkonto zugeordnet.") }
+                    if let previous = targets[account], previous != reference[0] { throw StoreError(message: "Dieses Zielkonto gehört zu einem anderen Bankkonto.") }
+                    linked[reference[0]] = account
+                    targets[account] = reference[0]
                 }
             }
-
-            // Import Rules
-            if let rules = payload["rules"] as? [[String: Any]] {
-                for r in rules {
-                    let id = (r["id"] as? String) ?? UUID().uuidString
-                    let name = (r["name"] as? String) ?? "Regel"
-                    let priority = (r["priority"] as? Int) ?? 20
-                    let applyCat = (r["applyCategory"] as? String) ?? "sonstiges"
-                    let enabled = (r["enabled"] as? Bool) ?? true
-                    let conditions = r["conditions"] ?? []
-                    let condData = (try? JSONSerialization.data(withJSONObject: conditions)) ?? Data("[]".utf8)
-                    let condJson = String(data: condData, encoding: .utf8) ?? "[]"
-
-                    var stmt: OpaquePointer?
-                    let sql = """
-                    INSERT INTO rules (id, profile_id, name, priority, conditions, apply_category, enabled, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id, profile_id) DO UPDATE SET
-                        name = excluded.name,
-                        priority = excluded.priority,
-                        conditions = excluded.conditions,
-                        apply_category = excluded.apply_category,
-                        enabled = excluded.enabled,
-                        updated_at = excluded.updated_at,
-                        deleted_at = NULL;
-                    """
-                    if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                        sqlite3_bind_text(stmt, 1, (id as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 2, (profileId as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 3, (name as NSString).utf8String, -1, nil)
-                        sqlite3_bind_int(stmt, 4, Int32(priority))
-                        sqlite3_bind_text(stmt, 5, (condJson as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 6, (applyCat as NSString).utf8String, -1, nil)
-                        sqlite3_bind_int(stmt, 7, enabled ? 1 : 0)
-                        sqlite3_bind_text(stmt, 8, (now as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 9, (now as NSString).utf8String, -1, nil)
-                        sqlite3_step(stmt)
+            var byHash = Dictionary(grouping: existing, by: { ($0.payload["account"] as? String ?? "") + ":" + ($0.payload["sourceHash"] as? String ?? "") })
+            var consumed = Set<String>()
+            var occurrences = [String: Int]()
+            for original in items {
+                var value = original
+                let account = value["account"] as? String ?? "comdirect Girokonto"
+                let hash = value["sourceHash"] as? String ?? ""
+                guard !hash.isEmpty else { throw StoreError(message: "Import-Fingerprint fehlt.") }
+                if appendOnly {
+                    guard hash.hasPrefix("comdirect_api_"), value["status"] as? String == "booked", value["currency"] as? String == "EUR" else {
+                        throw StoreError(message: "Ungültige Buchungen im Bankabruf. Nichts gespeichert.")
                     }
-                    sqlite3_finalize(stmt)
-                    markDirty(type: "Rule", id: id)
+                    if byHash[account + ":" + hash]?.isEmpty == false { duplicates += 1; continue }
+                }
+                let key = account + ":" + hash
+                let n = (occurrences[key] ?? 0) + 1; occurrences[key] = n
+                if let duplicate = byHash[key]?.first(where: { !consumed.contains($0.id) }) {
+                    consumed.insert(duplicate.id)
+                    if duplicate.payload["status"] as? String == "pending" && value["status"] as? String == "booked" {
+                        var promoted = duplicate.payload; promoted["status"] = "booked"
+                        try put(profile, "transactions", duplicate.id, promoted); updated += 1
+                    } else { duplicates += 1 }
+                    continue
+                }
+                let cents = try Self.cents(value["amount"])
+                let payee = (value["payee"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let pending = existing.first { record in
+                    record.payload["status"] as? String == "pending" && !consumed.contains(record.id) &&
+                    record.payload["date"] as? String == value["date"] as? String &&
+                    (try? Self.cents(record.payload["amount"])) == cents &&
+                    (record.payload["payee"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == payee &&
+                    record.payload["account"] as? String == account
+                }
+                if !appendOnly, let pending, value["status"] as? String != "pending" {
+                    var promoted = pending.payload
+                    for field in ["status", "rawText", "type", "sourceHash", "valutaDate"] { if let new = value[field] { promoted[field] = new } }
+                    promoted["status"] = "booked"
+                    try put(profile, "transactions", pending.id, promoted)
+                    consumed.insert(pending.id); updated += 1
+                } else {
+                    let portableID = Self.stableIdentity("transaction:\(profile)", "import:\(account):\(hash):\(n)")
+                    let id = Self.stableIdentity("native-transaction:\(profile)", portableID)
+                    value["id"] = id; value["syncId"] = portableID; value["account"] = account
+                    value["importedAt"] = value["importedAt"] ?? Self.now()
+                    try validate("transactions", value)
+                    // A tombstone prevents a stale CSV from resurrecting a deleted transaction.
+                    if let old = try find(profile, "transactions", id), old.deletedAt != nil { duplicates += 1; continue }
+                    try put(profile, "transactions", id, value)
+                    if let added = try find(profile, "transactions", id) { byHash[key, default: []].append(added); consumed.insert(id) }
+                    inserted += 1
                 }
             }
-
-            // Import Bank Templates
-            if let templates = payload["bankTemplates"] as? [[String: Any]] {
-                for bt in templates {
-                    let id = (bt["id"] as? String) ?? "comdirect"
-                    let name = (bt["name"] as? String) ?? "Template"
-                    let desc = (bt["description"] as? String) ?? ""
-                    let enc = (bt["encoding"] as? String) ?? "windows-1252"
-                    let delim = (bt["delimiter"] as? String) ?? ";"
-                    let headerId = (bt["headerIdentifier"] as? String) ?? "Buchungstag"
-                    let cols = bt["columns"] ?? [:]
-                    let colsData = (try? JSONSerialization.data(withJSONObject: cols)) ?? Data("{}".utf8)
-                    let colsJson = String(data: colsData, encoding: .utf8) ?? "{}"
-                    let textParser = (bt["textParser"] as? String) ?? "comdirect"
-                    let dateFormat = (bt["dateFormat"] as? String) ?? "DD.MM.YYYY"
-
-                    var stmt: OpaquePointer?
-                    let sql = """
-                    INSERT INTO bank_templates (id, profile_id, name, description, encoding, delimiter, header_identifier, columns, text_parser, date_format, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id, profile_id) DO UPDATE SET
-                        name = excluded.name,
-                        description = excluded.description,
-                        encoding = excluded.encoding,
-                        delimiter = excluded.delimiter,
-                        header_identifier = excluded.header_identifier,
-                        columns = excluded.columns,
-                        text_parser = excluded.text_parser,
-                        date_format = excluded.date_format,
-                        updated_at = excluded.updated_at,
-                        deleted_at = NULL;
-                    """
-                    if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                        sqlite3_bind_text(stmt, 1, (id as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 2, (profileId as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 3, (name as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 4, (desc as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 5, (enc as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 6, (delim as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 7, (headerId as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 8, (colsJson as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 9, (textParser as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 10, (dateFormat as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 11, (now as NSString).utf8String, -1, nil)
-                        sqlite3_bind_text(stmt, 12, (now as NSString).utf8String, -1, nil)
-                        sqlite3_step(stmt)
+            if !appendOnly, let checkpoint, let balance = checkpoint["newBalance"], !(balance is NSNull) {
+                _ = try Self.cents(balance)
+                if let account = try find(profile, "accounts", "comdirect") {
+                    let end = checkpoint["endDate"] as? String ?? items.compactMap { $0["date"] as? String }.max() ?? Self.now().prefix(10).description
+                    let oldDate = account.payload["checkpointDate"] as? String ?? ""
+                    if end >= oldDate {
+                        var changes: [String: Any] = ["checkpointBalance": balance, "checkpointDate": end]
+                        if let iban = checkpoint["iban"] as? String { changes["iban"] = iban }
+                        try updateAccount(profile, "comdirect", changes)
                     }
-                    sqlite3_finalize(stmt)
-                    markDirty(type: "BankTemplate", id: id)
                 }
             }
-
-            // Import Transactions
-            if let txs = payload["transactions"] as? [[String: Any]] {
-                var insStmt: OpaquePointer?
-                let insSql = """
-                INSERT INTO transactions (
-                    id, profile_id, date, valuta_date, amount_cents, currency, payee, purpose, raw_text, type, category, account, status, source_hash, imported_at, is_manual, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    date = excluded.date,
-                    valuta_date = excluded.valuta_date,
-                    amount_cents = excluded.amount_cents,
-                    currency = excluded.currency,
-                    payee = excluded.payee,
-                    purpose = excluded.purpose,
-                    raw_text = excluded.raw_text,
-                    type = excluded.type,
-                    category = excluded.category,
-                    account = excluded.account,
-                    status = excluded.status,
-                    source_hash = excluded.source_hash,
-                    updated_at = excluded.updated_at,
-                    deleted_at = NULL;
-                """
-                sqlite3_prepare_v2(db, insSql, -1, &insStmt, nil)
-
-                for t in txs {
-                    let txId = (t["id"] as? String) ?? UUID().uuidString
-                    let date = (t["date"] as? String) ?? now.prefix(10).description
-                    let amount = (t["amount"] as? Double) ?? 0.0
-                    let amountCents = centsFromEuro(amount)
-                    let hash = (t["sourceHash"] as? String) ?? "tx_\(UUID().uuidString)"
-
-                    sqlite3_reset(insStmt)
-                    sqlite3_bind_text(insStmt, 1, (txId as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 2, (profileId as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 3, (date as NSString).utf8String, -1, nil)
-                    if let vd = t["valutaDate"] as? String { sqlite3_bind_text(insStmt, 4, (vd as NSString).utf8String, -1, nil) } else { sqlite3_bind_null(insStmt, 4) }
-                    sqlite3_bind_int64(insStmt, 5, sqlite3_int64(amountCents))
-                    sqlite3_bind_text(insStmt, 6, ((t["currency"] as? String ?? "EUR") as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 7, ((t["payee"] as? String ?? "Unbekannt") as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 8, ((t["purpose"] as? String ?? "") as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 9, ((t["rawText"] as? String ?? "") as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 10, ((t["type"] as? String ?? "") as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 11, ((t["category"] as? String ?? "sonstiges") as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 12, ((t["account"] as? String ?? "comdirect Girokonto") as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 13, ((t["status"] as? String ?? "booked") as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 14, (hash as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 15, ((t["importedAt"] as? String ?? now) as NSString).utf8String, -1, nil)
-                    sqlite3_bind_int(insStmt, 16, (t["isManual"] as? Bool == true) ? 1 : 0)
-                    sqlite3_bind_text(insStmt, 17, (now as NSString).utf8String, -1, nil)
-                    sqlite3_bind_text(insStmt, 18, (now as NSString).utf8String, -1, nil)
-                    sqlite3_step(insStmt)
-
-                    markDirty(type: "Transaction", id: txId)
-                }
-                sqlite3_finalize(insStmt)
-            }
-
-            exec("COMMIT;")
-            return true
+            return ["inserted": inserted, "updated": updated, "duplicates": duplicates]
         }
     }
-
-    public func resetProfileData(profileId: String) -> Bool {
-        return queue.sync {
-            exec("BEGIN TRANSACTION;")
-            let now = nowISO()
-            exec("UPDATE transactions SET deleted_at = '\(now)', updated_at = '\(now)' WHERE profile_id = '\(profileId)' AND deleted_at IS NULL;")
-            exec("UPDATE rules SET deleted_at = '\(now)', updated_at = '\(now)' WHERE profile_id = '\(profileId)' AND deleted_at IS NULL;")
-            exec("UPDATE categories SET deleted_at = '\(now)', updated_at = '\(now)' WHERE profile_id = '\(profileId)' AND deleted_at IS NULL;")
-            exec("UPDATE bank_templates SET deleted_at = '\(now)', updated_at = '\(now)' WHERE profile_id = '\(profileId)' AND deleted_at IS NULL;")
-            exec("UPDATE accounts SET deleted_at = '\(now)', updated_at = '\(now)' WHERE profile_id = '\(profileId)' AND deleted_at IS NULL;")
-
-            seedProfileDefaults(profileId: profileId)
-            exec("COMMIT;")
-            return true
+    private func snapshot(_ profile: String) throws -> [String: Any] {
+        var data = try profileData(profile)
+        var p = data["profile"] as? [String: Any] ?? [:]; p["hasPin"] = false
+        let extra = try metadata("backupExtra:\(profile)").map(Self.object) ?? [:]
+        data.merge(extra) { current, _ in current }
+        data["profile"] = p; data["profileId"] = profile; data["profileName"] = p["name"]
+        data["includedCollections"] = Self.kinds
+        data["syncConflicts"] = try records(profile, "conflicts").map { conflict in
+            var value = conflict.payload
+            if let id = value["recordId"] as? String, let current = try record(id) { value["current"] = current.envelope }
+            return value
         }
+        return data
     }
-
-    // MARK: - CloudKit Sync Queue & Records Bridge
-
-    public func getPendingSyncRecords() -> [(recordType: String, recordId: String, operation: String)] {
-        return queue.sync {
-            var records = [(recordType: String, recordId: String, operation: String)]()
-            let sql = "SELECT record_type, record_id, operation FROM sync_queue ORDER BY created_at ASC LIMIT 100;"
-            var stmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                while sqlite3_step(stmt) == SQLITE_ROW {
-                    let rType = String(cString: sqlite3_column_text(stmt, 0))
-                    let rId = String(cString: sqlite3_column_text(stmt, 1))
-                    let op = String(cString: sqlite3_column_text(stmt, 2))
-                    records.append((rType, rId, op))
+    public func exportBackup(_ profile: String, all: Bool) throws -> [String: Any] {
+        try transaction {
+            var root = try snapshot(profile)
+            var extras = [[String: Any]](), profileList = [root["profile"] as? [String: Any] ?? [:]]
+            if all {
+                for other in try profiles() where other["id"] as? String != profile {
+                    guard let id = other["id"] as? String else { continue }
+                    let data = try snapshot(id); extras.append(data); profileList.append(data["profile"] as? [String: Any] ?? [:])
                 }
             }
-            sqlite3_finalize(stmt)
-            return records
+            root["format"] = "dagobert_backup"; root["schemaVersion"] = 2; root["sourcePlatform"] = "ios"; root["exportedAt"] = Self.now()
+            root["profiles"] = profileList; root["additionalProfiles"] = extras
+            return root
         }
     }
-
-    public func clearSyncQueue(records: [(recordType: String, recordId: String)]) {
-        queue.sync {
-            for r in records {
-                exec("DELETE FROM sync_queue WHERE record_type = '\(r.recordType)' AND record_id = '\(r.recordId)';")
+    public func importBackup(_ target: String, _ payload: [String: Any], mode: String) throws -> [String] {
+        try transaction {
+            guard ["replace", "merge", "new_profile"].contains(mode), payload["format"] as? String == "dagobert_backup",
+                  (payload["schemaVersion"] as? Int) == 2 else { throw StoreError(message: "Nicht unterstütztes Backupformat.") }
+            let snapshots = [payload] + (payload["additionalProfiles"] as? [[String: Any]] ?? [])
+            var imported = [String](), used = Set<String>()
+            for (index, snapshot) in snapshots.enumerated() {
+                guard let source = snapshot["profileId"] as? String, let name = snapshot["profileName"] as? String else { throw StoreError(message: "Profilzuordnung fehlt.") }
+                let id = mode == "new_profile" ? UUID().uuidString.lowercased() : index == 0 ? target : source
+                guard used.insert(id).inserted else { throw StoreError(message: "Doppelte Profilzuordnung.") }
+                var p = snapshot["profile"] as? [String: Any] ?? ["name": name, "icon": "User", "color": "#0A84FF"]
+                for key in ["pin", "pinHash", "pin_hash", "credentialId"] { p.removeValue(forKey: key) }
+                p["id"] = id; p["hasPin"] = nil
+                if mode == "new_profile" { p["isDefault"] = false }
+                if try find(id, "profiles", id) == nil || mode == "replace" { try put(id, "profiles", id, p) }
+                let included = snapshot["includedCollections"] as? [String] ?? Self.kinds
+                for kind in Self.kinds where included.contains(kind) {
+                    guard let values = snapshot[kind] as? [[String: Any]] else { throw StoreError(message: "Unvollständiger Profilbestand.") }
+                    let current = try records(id, kind, includeDeleted: true)
+                    var retained = Set<String>(), occurrences = [String: Int]()
+                    for original in values {
+                        var value = original
+                        let key: String
+                        if kind == "transactions" {
+                            let fingerprint = "\(value["account"] as? String ?? ""):\(value["sourceHash"] as? String ?? "")"
+                            let n = (occurrences[fingerprint] ?? 0) + 1; occurrences[fingerprint] = n
+                            let legacyID = value["id"].map { String(describing: $0) }
+                            let portableID = value["syncId"] as? String ?? Self.stableIdentity("transaction:\(source)", legacyID.map { "id:\($0)" } ?? "import:\(fingerprint):\(n)")
+                            key = Self.stableIdentity("native-transaction:\(id)", portableID)
+                            value["id"] = key; value["syncId"] = portableID
+                        } else {
+                            guard let entityID = value["id"] as? String else { throw StoreError(message: "Datensatz-ID fehlt.") }; key = entityID
+                        }
+                        guard retained.insert(key).inserted else { throw StoreError(message: "Doppelte Datensatz-ID im Backup.") }
+                        value = try Self.canonicalMoney(kind, value)
+                        try validate(kind, value)
+                        if mode == "merge", let old = current.first(where: { $0.id == key }) {
+                            if old.deletedAt != nil || !Self.equal(old.payload, value) {
+                                throw StoreError(message: "Das Backup enthält abweichende oder gelöschte Einträge. Bitte als neues Profil importieren oder bewusst ersetzen.")
+                            }
+                        } else { try put(id, kind, key, value) }
+                    }
+                    if mode == "replace" {
+                        for old in current where !retained.contains(old.id) && old.deletedAt == nil { try put(id, kind, old.id, old.payload, deletedAt: Self.now()) }
+                    }
+                }
+                try restoreConflicts(snapshot, source: source, target: id, mode: mode)
+                var extra = snapshot
+                for key in Self.kinds + ["profile", "profiles", "additionalProfiles", "format", "schemaVersion", "exportedAt", "sourcePlatform", "syncConflicts"] { extra.removeValue(forKey: key) }
+                try setMetadata("backupExtra:\(id)", Self.json(extra))
+                imported.append(id)
+            }
+            return imported
+        }
+    }
+    private func restoreConflicts(_ snapshot: [String: Any], source: String, target: String, mode: String) throws {
+        guard snapshot["syncConflicts"] == nil || snapshot["syncConflicts"] is [[String: Any]] else { throw StoreError(message: "Ungültige Konfliktsicherung.") }
+        let incoming = snapshot["syncConflicts"] as? [[String: Any]] ?? []
+        var retained = Set<String>()
+        for original in incoming {
+            guard let oldRecordID = original["recordId"] as? String, let oldID = original["id"] as? String,
+                  let rawVersions = original["versions"] as? [[String: Any]], rawVersions.count >= 2 else { throw StoreError(message: "Unvollständige Konfliktsicherung.") }
+            var changes = Set<String>()
+            func remap(_ envelope: [String: Any]) throws -> [String: Any] {
+                guard envelope["schemaVersion"] as? Int == 2, envelope["profileId"] as? String == source,
+                      let kind = envelope["kind"] as? String, Self.kinds.contains(kind) || kind == "profiles",
+                      let entityID = envelope["id"] as? String, let change = envelope["changeId"] as? String, !change.isEmpty,
+                      let raw = envelope["data"] as? [String: Any], raw["id"] as? String == entityID,
+                      oldRecordID == Self.stableIdentity("record:\(source):\(kind)", entityID) else { throw StoreError(message: "Ungültige Konfliktzuordnung.") }
+                var value = try Self.canonicalMoney(kind, raw), result = envelope
+                let id: String
+                if kind == "transactions" {
+                    let portable = value["syncId"] as? String ?? Self.stableIdentity("transaction:\(source)", "id:\(entityID)")
+                    id = Self.stableIdentity("native-transaction:\(target)", portable)
+                    value["syncId"] = portable
+                } else { id = kind == "profiles" ? target : entityID }
+                value["id"] = id
+                if kind == "profiles", mode == "new_profile" { value["isDefault"] = false }
+                if Self.kinds.contains(kind) { try validate(kind, value) }
+                result["profileId"] = target; result["id"] = id; result["data"] = value
+                if source != target { result["resolves"] = [String]() }
+                return result
+            }
+            let versions = try rawVersions.map { version -> [String: Any] in
+                guard let change = version["changeId"] as? String, changes.insert(change).inserted else { throw StoreError(message: "Doppelte Konfliktversion.") }
+                return try remap(version)
+            }
+            guard oldID == Self.stableIdentity("conflict:\(oldRecordID)", changes.sorted().joined(separator: ":")),
+                  let kind = versions[0]["kind"] as? String, let entityID = versions[0]["id"] as? String else { throw StoreError(message: "Ungültige Konfliktidentität.") }
+            let recordID = Self.stableIdentity("record:\(target):\(kind)", entityID)
+            let id = Self.stableIdentity("conflict:\(recordID)", changes.sorted().joined(separator: ":"))
+            guard retained.insert(id).inserted else { throw StoreError(message: "Doppelte Konfliktidentität.") }
+            var value = original
+            value["id"] = id; value["recordId"] = recordID; value["versions"] = versions
+            let current: [String: Any]
+            if let raw = original["current"] as? [String: Any] {
+                current = try remap(raw)
+                guard versions.contains(where: { (try? Self.json($0)) == (try? Self.json(current)) }) else { throw StoreError(message: "Aktuelle Konfliktversion fehlt.") }
+            } else if let old = try find(target, kind, entityID), let version = versions.first(where: {
+                Self.equal($0["data"] as? [String: Any] ?? [:], old.payload) && $0["deletedAt"] as? String == old.deletedAt
+            }) { current = version }
+            else { throw StoreError(message: "Die aktuelle Konfliktversion fehlt im Backup. Bitte die Original-App aktualisieren und erneut exportieren.") }
+            if let entity = try find(target, kind, entityID), entity.deletedAt == nil,
+               !Self.equal(entity.payload, current["data"] as? [String: Any] ?? [:]) || current["deletedAt"] != nil {
+                throw StoreError(message: "Der Datensatz wurde außerhalb der Konfliktauflösung verändert. Bitte zuerst die Konflikte in der Original-App auflösen; es wurden keine Daten übernommen.")
+            }
+            value.removeValue(forKey: "current")
+            if mode == "merge", let existing = try find(target, "conflicts", id), !Self.equal(existing.payload, value) {
+                throw StoreError(message: "Abweichende Konfliktsicherung. Bitte getrennt als neues Profil importieren.")
+            }
+            try put(target, kind, entityID, current["data"] as? [String: Any] ?? [:], deletedAt: current["deletedAt"] as? String)
+            try execute("UPDATE records SET change_id=?,revision=?,blocked=1 WHERE record_id=?", [current["changeId"], current["revision"] as? Int ?? 1, recordID])
+            try put(target, "conflicts", id, value)
+        }
+        if mode == "replace", try records(target, "conflicts").contains(where: { !retained.contains($0.id) }) {
+            throw StoreError(message: "Vorhandene Konflikte fehlen in dieser Sicherung. Bitte zuerst auflösen oder als neues Profil importieren.")
+        }
+    }
+    public func resetProfile(_ profile: String) throws {
+        try transaction {
+            try requireProfile(profile)
+            for record in try records(profile) where Self.kinds.contains(record.kind) { try put(profile, record.kind, record.id, record.payload, deletedAt: Self.now()) }
+            try seed(profile)
+        }
+    }
+    private static func equal(_ a: [String: Any], _ b: [String: Any]) -> Bool {
+        var a = a, b = b
+        for key in ["id", "syncId", "importedAt", "hasPin"] { a.removeValue(forKey: key); b.removeValue(forKey: key) }
+        return (try? json(a)) == (try? json(b))
+    }
+    private func validate(_ kind: String, _ data: [String: Any]) throws {
+        guard let id = data["id"] as? String, !id.isEmpty else { throw StoreError(message: "Datensatz-ID fehlt.") }
+        if kind == "transactions" {
+            for key in ["date", "currency", "payee", "purpose", "rawText", "type", "category", "account", "sourceHash", "importedAt"] {
+                guard data[key] is String else { throw StoreError(message: "Buchung ist unvollständig.") }
+            }
+            _ = try Self.cents(data["amount"])
+            guard ["booked", "pending"].contains(data["status"] as? String ?? "booked") else { throw StoreError(message: "Unbekannter Buchungsstatus.") }
+        } else if kind == "accounts" {
+            _ = try Self.cents(data["initialBalance"])
+            if let value = data["checkpointBalance"], !(value is NSNull) { _ = try Self.cents(value) }
+        } else if kind == "categories", let value = data["budget"], !(value is NSNull) { _ = try Self.cents(value) }
+        for field in kind == "transactions" ? ["date", "valutaDate"] : kind == "accounts" ? ["initialBalanceDate", "checkpointDate"] : [] {
+            if let text = data[field] as? String, !text.isEmpty {
+                let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.timeZone = TimeZone(secondsFromGMT: 0)
+                formatter.calendar = Calendar(identifier: .gregorian); formatter.dateFormat = "yyyy-MM-dd"; formatter.isLenient = false
+                guard let parsed = formatter.date(from: text), formatter.string(from: parsed) == text else { throw StoreError(message: "Ungültiges Kalenderdatum.") }
+            } else if field == "date" || field == "initialBalanceDate" { throw StoreError(message: "Saldostichtag oder Buchungsdatum fehlt.") }
+        }
+        if kind == "rules" {
+            guard let conditions = data["conditions"] as? [[String: Any]], data["enabled"] is NSNumber, data["priority"] is NSNumber,
+                  data["applyCategory"] is String else { throw StoreError(message: "Unvollständige Kategorisierungsregel.") }
+            for condition in conditions {
+                guard ["payee", "purpose", "rawText", "type", "amount"].contains(condition["field"] as? String ?? ""),
+                    ["contains", "equals", "startsWith", "regex", "greaterThan", "lessThan"].contains(condition["operator"] as? String ?? ""),
+                    condition["value"] is String else { throw StoreError(message: "Unbekannte Regelbedingung.") }
             }
         }
+        if kind == "bankTemplates" {
+            guard let columns = data["columns"] as? [String: Any], ["date", "rawText", "amount"].allSatisfy({ columns[$0] is String }) else { throw StoreError(message: "Ungültige Bankvorlage.") }
+        }
+        _ = try Self.json(data)
     }
 
-    public func getSyncState(key: String) -> String? {
-        return queue.sync {
-            var stmt: OpaquePointer?
-            let sql = "SELECT value FROM sync_state WHERE key = ?;"
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
-            defer { sqlite3_finalize(stmt) }
-            sqlite3_bind_text(stmt, 1, (key as NSString).utf8String, -1, nil)
-            if sqlite3_step(stmt) == SQLITE_ROW {
-                return String(cString: sqlite3_column_text(stmt, 0))
-            }
-            return nil
+    // Durable outbox and acknowledgements are part of the same transaction as the data.
+    public func pending() throws -> [SyncRecord] {
+        lock.lock(); defer { lock.unlock() }
+        return try rows("SELECT * FROM records WHERE dirty=1 AND blocked=0 ORDER BY kind,id").map(decode)
+    }
+    public func pendingCount() throws -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return Int(try rows("SELECT count(*) AS n FROM records WHERE dirty=1").first?["n"] as? Int64 ?? 0)
+    }
+    public func acknowledge(_ recordID: String, changeID: String, systemFields: Data, sentEnvelope: [String: Any]? = nil) throws {
+        try transaction {
+            guard let current = try record(recordID) else { return }
+            try execute("UPDATE records SET system_fields=?, base_payload=?, dirty=CASE WHEN change_id=? THEN 0 ELSE dirty END WHERE record_id=?",
+                [systemFields, Self.json(sentEnvelope ?? current.envelope), changeID, recordID])
         }
     }
-
-    public func setSyncState(key: String, value: String) {
-        queue.sync {
-            var stmt: OpaquePointer?
-            let sql = "INSERT INTO sync_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value;"
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(stmt, 1, (key as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 2, (value as NSString).utf8String, -1, nil)
-                sqlite3_step(stmt)
+    public func applyRemote(_ envelope: [String: Any], recordID: String, systemFields: Data) throws {
+        try transaction {
+            guard envelope["schemaVersion"] as? Int == 2, let profile = envelope["profileId"] as? String,
+                  let kind = envelope["kind"] as? String, let id = envelope["id"] as? String,
+                  let rawValue = envelope["data"] as? [String: Any], let changeID = envelope["changeId"] as? String,
+                  Self.kinds.contains(kind) || ["profiles", "conflicts"].contains(kind) else { throw StoreError(message: "Unbekannter iCloud-Datensatz. Bitte Dagobert aktualisieren.") }
+            guard recordID == Self.stableIdentity("record:\(profile):\(kind)", id) else { throw StoreError(message: "Ungültige iCloud-Datensatzidentität.") }
+            let value = try Self.canonicalMoney(kind, rawValue)
+            guard value["id"] as? String == id else { throw StoreError(message: "iCloud-Inhalt und Datensatzidentität stimmen nicht überein.") }
+            var envelope = envelope
+            envelope["data"] = value
+            let deleted = envelope["deletedAt"] as? String
+            if Self.kinds.contains(kind) { try validate(kind, value) }
+            let previousRow = try rows("SELECT * FROM records WHERE record_id=?", [recordID]).first
+            let resolves = envelope["resolves"] as? [String] ?? []
+            var resolutionCoversCurrent = false
+            if let old = try record(recordID) {
+                for conflictID in resolves {
+                    if let conflict = try find(profile, "conflicts", conflictID),
+                       let versions = conflict.payload["versions"] as? [[String: Any]],
+                       versions.contains(where: { $0["changeId"] as? String == old.changeID }) { resolutionCoversCurrent = true }
+                }
             }
-            sqlite3_finalize(stmt)
+            if let previousRow, let old = try record(recordID), previousRow["dirty"] as? Int64 == 1, previousRow["seeded"] as? Int64 != 1, !resolutionCoversCurrent {
+                let base = try (previousRow["base_payload"] as? String).map(Self.object)
+                if old.changeID == changeID || (Self.equal(old.payload, value) && old.deletedAt == deleted) {
+                    try acknowledge(recordID, changeID: old.changeID, systemFields: systemFields, sentEnvelope: envelope)
+                    try execute("UPDATE records SET blocked=0 WHERE record_id=?", [recordID])
+                    return
+                }
+                if let base, Self.equal(base["data"] as? [String: Any] ?? [:], value), base["deletedAt"] as? String == deleted {
+                    try execute("UPDATE records SET system_fields=?,base_payload=? WHERE record_id=?", [systemFields, Self.json(envelope), recordID]); return
+                }
+                // Preserve both complete versions and block this record until the user resolves it.
+                let conflictID = Self.stableIdentity("conflict:\(recordID)", [old.changeID, changeID].sorted().joined(separator: ":"))
+                if kind == "conflicts" { throw StoreError(message: "Gleichzeitige Konfliktauflösung erkannt. Bitte erneut synchronisieren.") }
+                let versions = [old.envelope, envelope].sorted { ($0["changeId"] as? String ?? "") < ($1["changeId"] as? String ?? "") }
+                try put(profile, "conflicts", conflictID, ["id": conflictID, "recordId": recordID, "versions": versions])
+                try execute("UPDATE records SET blocked=1,system_fields=?,base_payload=? WHERE record_id=?", [systemFields, Self.json(envelope), recordID])
+                return
+            }
+            try execute("INSERT OR IGNORE INTO record_scopes(id) VALUES (?)", [profile])
+            try execute("""
+                INSERT INTO records(profile_id,kind,id,record_id,payload,amount_cents,revision,change_id,deleted_at,dirty,system_fields,base_payload,resolves)
+                VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?) ON CONFLICT(profile_id,kind,id) DO UPDATE SET
+                payload=excluded.payload,amount_cents=excluded.amount_cents,revision=excluded.revision,change_id=excluded.change_id,
+                deleted_at=excluded.deleted_at,dirty=0,seeded=0,blocked=0,system_fields=excluded.system_fields,base_payload=excluded.base_payload,resolves=excluded.resolves
+                """, [profile, kind, id, recordID, Self.json(value), kind == "transactions" ? try Self.cents(value["amount"]) : nil,
+                        envelope["revision"] as? Int ?? 1, changeID, deleted, systemFields, Self.json(envelope), Self.json(resolves)])
         }
     }
-
-    public func countPendingSync() -> Int {
-        return queue.sync {
-            return scalarInt("SELECT count(*) FROM sync_queue;")
+    public func conflicts() throws -> [[String: Any]] { try records(nil, "conflicts").map(\.payload) }
+    public func resolveConflict(_ id: String, version: Int) throws {
+        try transaction {
+            guard let conflict = try records(nil, "conflicts").first(where: { $0.id == id }),
+                  let versions = conflict.payload["versions"] as? [[String: Any]], versions.indices.contains(version),
+                  let profile = versions[version]["profileId"] as? String, let kind = versions[version]["kind"] as? String,
+                  let entityID = versions[version]["id"] as? String, let data = versions[version]["data"] as? [String: Any] else {
+                throw StoreError(message: "Konflikt nicht gefunden.")
+            }
+            try put(profile, kind, entityID, data, deletedAt: versions[version]["deletedAt"] as? String)
+            let resolved = Array(Set((try find(profile, kind, entityID)?.resolves ?? []) + [id])).sorted()
+            try execute("UPDATE records SET blocked=0,dirty=1,change_id=?,revision=revision+1,resolves=? WHERE profile_id=? AND kind=? AND id=?", [UUID().uuidString.lowercased(), Self.json(resolved), profile, kind, entityID])
+            try put(conflict.profileID, "conflicts", conflict.id, conflict.payload, deletedAt: Self.now())
+        }
+    }
+    public func markAllPending(clearSystemFields: Bool) throws {
+        _ = try transaction {
+            try execute("UPDATE records SET dirty=1" + (clearSystemFields ? ",system_fields=NULL,base_payload=NULL" : ""))
+        }
+    }
+    public func serverDeleted(_ recordID: String) throws {
+        try transaction {
+            // App deletions are tombstones. A hard server deletion requires review, never resurrection.
+            guard let record = try record(recordID) else { return }
+            let envelope = record.envelope.merging(["deletedAt": Self.now(), "changeId": UUID().uuidString.lowercased()]) { _, new in new }
+            try applyRemote(envelope, recordID: recordID, systemFields: record.systemFields ?? Data())
+        }
+    }
+    private func migrateLegacy() throws {
+        guard try metadata("legacyMigrated") == nil else { return }
+        guard !(try rows("SELECT name FROM sqlite_master WHERE type='table' AND name='profiles'")).isEmpty else {
+            try setMetadata("legacyMigrated", "1"); return
+        }
+        try transaction {
+            for p in try rows("SELECT * FROM profiles") {
+                guard let id = p["id"] as? String else { throw StoreError(message: "Altes Profil ist unvollständig.") }
+                let profile: [String: Any] = ["id": id, "name": p["name"] ?? "Privat", "icon": p["icon"] ?? "User", "color": p["color"] ?? "#0A84FF", "isDefault": (p["is_default"] as? Int64 ?? 0) != 0, "createdAt": p["created_at"] ?? Self.now()]
+                try put(id, "profiles", id, profile, deletedAt: p["deleted_at"] as? String)
+                if let hash = p["pin_hash"] as? String { try setPinHash(id, hash) }
+                for kind in Self.kinds {
+                    let table = kind == "bankTemplates" ? "bank_templates" : kind
+                    for row in try rows("SELECT * FROM \(table) WHERE profile_id=?", [id]) {
+                        var value = row
+                        let aliases = ["initial_balance_date": "initialBalanceDate", "checkpoint_date": "checkpointDate", "valuta_date": "valutaDate", "raw_text": "rawText", "source_hash": "sourceHash", "imported_at": "importedAt", "is_manual": "isManual", "apply_category": "applyCategory", "header_identifier": "headerIdentifier", "text_parser": "textParser", "date_format": "dateFormat"]
+                        for (snake, camel) in aliases { if let v = value.removeValue(forKey: snake) { value[camel] = v } }
+                        for (column, key) in ["amount_cents": "amount", "budget_cents": "budget", "initial_balance_cents": "initialBalance", "checkpoint_balance_cents": "checkpointBalance"] {
+                            if let original = value.removeValue(forKey: column) {
+                                if let cents = original as? Int64 { value[key] = Double(cents) / 100 }
+                                else if original is NSNull { value[key] = NSNull() }
+                                else { throw StoreError(message: "Ungültiger Centbetrag im Altbestand.") }
+                            }
+                        }
+                        for field in ["conditions", "columns"] { if let json = value[field] as? String, let bytes = json.data(using: .utf8) { value[field] = try JSONSerialization.jsonObject(with: bytes) } }
+                        if let enabled = value["enabled"] as? Int64 { value["enabled"] = enabled != 0 }
+                        if let manual = value["isManual"] as? Int64 { value["isManual"] = manual != 0 }
+                        guard let entityID = value["id"] as? String else { throw StoreError(message: "Alte Datensatz-ID fehlt.") }
+                        if kind == "transactions" { value["syncId"] = entityID }
+                        let deleted = value["deleted_at"] as? String
+                        for key in ["profile_id", "deleted_at", "updated_at", "created_at", "legacy_id"] { value.removeValue(forKey: key) }
+                        try put(id, kind, entityID, value, deletedAt: deleted)
+                    }
+                }
+            }
+            // Legacy tables remain untouched so migration never destroys the previous store.
+            try setMetadata("legacyMigrated", "1")
         }
     }
 }

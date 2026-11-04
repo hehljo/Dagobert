@@ -206,6 +206,7 @@ export function parseBankCsv(
   const valutaIdx = reqCols.valutaDate ? colIndexMap[reqCols.valutaDate] : undefined;
 
   const rows: ImportPreviewRow[] = [];
+  const occurrences = new Map<string, number>();
 
   for (let i = headerIndex + 1; i < lines.length; i++) {
     const line = lines[i];
@@ -245,9 +246,12 @@ export function parseBankCsv(
     const isPending = /vorgemerkt|offen/i.test(rawType);
     const status: 'booked' | 'pending' = isPending ? 'pending' : 'booked';
 
-    const sourceHash = computeTransactionHash(date, amount, rawText);
+    const baseHash = computeTransactionHash(date, amount, rawText);
+    const occurrence = (occurrences.get(baseHash) ?? 0) + 1;
+    occurrences.set(baseHash, occurrence);
+    const sourceHash = occurrence === 1 ? baseHash : `${baseHash}_${occurrence}`;
     const legacyHash = computeLegacyTransactionHash(date, amount, rawText);
-    const isDuplicate = existingHashes.has(sourceHash) || existingHashes.has(legacyHash);
+    const isDuplicate = existingHashes.has(sourceHash) || (occurrence === 1 && existingHashes.has(legacyHash));
 
     rows.push({
       date,

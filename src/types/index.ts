@@ -9,7 +9,8 @@ export interface Profile {
 }
 
 export interface Transaction {
-  id?: number;
+  id?: number | string;
+  syncId?: string;
   date: string; // YYYY-MM-DD
   valutaDate?: string; // YYYY-MM-DD
   amount: number; // positive = income, negative = expense
@@ -21,7 +22,8 @@ export interface Transaction {
   category: string;
   subcategory?: string;
   account: string;
-  tags?: string[];
+  accountId?: string;
+  tags?: string[] | null;
   importedAt: string;
   sourceHash: string; // deterministic hash for deduplication
   isManual?: boolean;
@@ -31,11 +33,11 @@ export interface Transaction {
 export interface Account {
   id: string;
   name: string;
-  iban?: string;
+  iban?: string | null;
   initialBalance: number;
   initialBalanceDate: string; // YYYY-MM-DD
-  checkpointBalance?: number;
-  checkpointDate?: string; // YYYY-MM-DD
+  checkpointBalance?: number | null;
+  checkpointDate?: string | null; // YYYY-MM-DD
 }
 
 export interface CsvMetadata {
@@ -52,7 +54,7 @@ export interface Category {
   icon: string;
   color: string;
   type: 'expense' | 'income' | 'transfer';
-  budget?: number;
+  budget?: number | null;
 }
 
 export interface RuleCondition {
@@ -68,7 +70,7 @@ export interface CategoryRule {
   conditions: RuleCondition[];
   applyCategory: string;
   applySubcategory?: string;
-  applyTags?: string[];
+  applyTags?: string[] | null;
   enabled: boolean;
 }
 
@@ -102,5 +104,6 @@ export interface ImportPreviewRow {
   sourceHash: string;
   isDuplicate: boolean;
   isPendingPromotion?: boolean;
+  possibleDuplicate?: boolean;
   status: 'booked' | 'pending';
 }

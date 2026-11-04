@@ -1,20 +1,28 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { TrendingUp, TrendingDown, Wallet, ChevronLeft, ChevronRight, Upload, Sparkles, Landmark } from 'lucide-react';
 import type { Transaction, Category, Account } from '../types/index.ts';
-import { DonutChart, type DonutSlice } from './DonutChart.tsx';
-import { calculateRealAccountBalance } from '../lib/db.ts';
+import { DonutChart } from './DonutChart.tsx';
+import { summarizeMonth } from '../lib/monthSummary.ts';
+import { calculateAccountBalanceAt, calculateRealAccountBalance, firstBookedAccountDate, lastBookedAccountDate } from '../lib/db.ts';
+import { currentMonth, monthEndDate } from '../lib/dashboardPreferences.ts';
+import { useDashboardPreferences } from '../lib/useDashboardPreferences.ts';
+import { SALARY_CATEGORY_ID, budgetPeriod, dayBefore } from '../lib/salaryBudget.ts';
+import { useSalaryBudget } from '../lib/useSalaryBudget.ts';
 
 interface DashboardProps {
+  profileId: string;
   transactions: Transaction[];
   categories: Category[];
   account?: Account;
   selectedMonth: string; // YYYY-MM
   onMonthChange: (month: string) => void;
   onOpenImport: () => void;
-  onSelectCategoryFilter: (catId: string) => void;
+  /** `range` (start inclusive, end exclusive) is set in the budget view: the list then shows the same salary-to-salary period. */
+  onSelectCategoryFilter: (catId: string, range?: { start: string; end: string }) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
+  profileId,
   transactions,
   categories,
   account,
@@ -23,77 +31,52 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onOpenImport,
   onSelectCategoryFilter,
 }) => {
-  // Category map
-  const catMap = useMemo(() => {
-    return new Map(categories.map(c => [c.id, c]));
-  }, [categories]);
+  const { preference } = useSalaryBudget(profileId);
+  const { preference: dashboardPreference } = useDashboardPreferences(profileId);
+  const showMonthResult = dashboardPreference.showMonthResult;
+  const [calendarView, setCalendarView] = useState(false);
+  const budgetAvailable = preference.enabled && categories.some(category => category.id === SALARY_CATEGORY_ID && category.type === 'income');
+  const budgetView = budgetAvailable && !calendarView;
 
   // Real account balance
+  const firstBookingDate = useMemo(() => firstBookedAccountDate(account, transactions), [account, transactions]);
   const realBalance = useMemo(() => {
     return calculateRealAccountBalance(account, transactions);
   }, [account, transactions]);
 
+  // Balance at the end of a completed month (calendar month end, independent of the budget view)
+  // Budget view: one month runs from salary to salary (all bookings, not only the salary).
+  const period = useMemo(() => budgetView ? budgetPeriod(selectedMonth, transactions, preference) : null,
+    [budgetView, selectedMonth, transactions, preference]);
+  const now = new Date();
+  const today = `${currentMonth(now)}-${String(now.getDate()).padStart(2, '0')}`;
+  const isPastMonth = period ? period.end <= today : selectedMonth < currentMonth(now);
+  const selectedMonthEnd = period ? dayBefore(period.end) : monthEndDate(selectedMonth);
+  const formatDay = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString('de-DE');
+  // Latest booked transaction after the comdirect balance: the shown balance is carried forward to it.
+  const lastBookingDate = useMemo(() => lastBookedAccountDate(account, transactions), [account, transactions]);
+  const carriedTo = account?.checkpointDate && lastBookingDate && lastBookingDate > account.checkpointDate ? lastBookingDate : null;
+  const monthEndBalance = useMemo(() => {
+    return isPastMonth ? calculateAccountBalanceAt(account, transactions, selectedMonthEnd) : null;
+  }, [isPastMonth, account, transactions, selectedMonthEnd]);
+  // Balance before the first imported booking is only derived backwards from a later anchor.
+  const monthEndBeforeData = monthEndBalance !== null && firstBookingDate !== null && selectedMonthEnd < firstBookingDate;
+  const tileCount = 1 + (isPastMonth ? 1 : 0) + (showMonthResult ? 1 : 0);
+  const lgColumns = ({ 1: 'lg:grid-cols-1', 2: 'lg:grid-cols-2', 3: 'lg:grid-cols-3' } as Record<number, string>)[tileCount];
+  // Phone grid (2 columns): Kontostand next to the result tile, or next to the month-end tile for a
+  // completed month (then the result tile takes the row below). A lone tile fills its row.
+  const spanResult = showMonthResult && isPastMonth;
+  const spanBalance = tileCount === 1;
+
   // Filter transactions by selected month
   const monthTransactions = useMemo(() => {
-    return transactions.filter(t => t.date.startsWith(selectedMonth));
-  }, [transactions, selectedMonth]);
+    return transactions.filter(t => period ? t.date >= period.start && t.date < period.end : t.date.slice(0, 7) === selectedMonth);
+  }, [transactions, selectedMonth, period]);
 
-  // Calculate monthly cashflow totals & net category expenses
-  // Reimbursements and refunds in expense/transfer categories directly offset category expenses
-  const { income, expense, balance, savingsRate, categorySlices } = useMemo(() => {
-    const netCategoryMap = new Map<string, number>();
-    let grossIncome = 0;
-    let totalBal = 0;
-
-    for (const t of monthTransactions) {
-      totalBal += t.amount;
-      const catId = t.category || 'sonstiges';
-      const c = catMap.get(catId);
-
-      if (c?.type === 'income') {
-        grossIncome += t.amount;
-      } else {
-        const current = netCategoryMap.get(catId) || 0;
-        netCategoryMap.set(catId, current - t.amount);
-      }
-    }
-
-    let netExpenseSum = 0;
-    let refundSurplus = 0;
-    const slices: DonutSlice[] = [];
-
-    for (const [catId, netAmount] of netCategoryMap.entries()) {
-      const c = catMap.get(catId);
-      if (netAmount > 0.001) {
-        const rounded = Math.round((netAmount + Number.EPSILON) * 100) / 100;
-        netExpenseSum += rounded;
-        slices.push({
-          id: catId,
-          label: c?.name || catId,
-          value: rounded,
-          color: c?.color || '#8E8E93',
-          icon: c?.icon || 'Package'
-        });
-      } else if (netAmount < -0.001) {
-        refundSurplus += Math.abs(netAmount);
-      }
-    }
-
-    slices.sort((a, b) => b.value - a.value);
-
-    const effectiveExpense = Math.round((netExpenseSum + Number.EPSILON) * 100) / 100;
-    const effectiveIncome = Math.round((grossIncome + refundSurplus + Number.EPSILON) * 100) / 100;
-    const roundedBal = Math.round((totalBal + Number.EPSILON) * 100) / 100;
-    const rate = effectiveIncome > 0 ? Math.max(0, Math.round((roundedBal / effectiveIncome) * 100)) : 0;
-
-    return {
-      income: effectiveIncome,
-      expense: effectiveExpense,
-      balance: roundedBal,
-      savingsRate: rate,
-      categorySlices: slices
-    };
-  }, [monthTransactions, catMap]);
+  // Monthly cashflow totals & net category expenses (refunds offset their category)
+  const { income, expense, balance, savingsRate, categorySlices, surplusSlices } = useMemo(
+    () => summarizeMonth(monthTransactions, categories, dashboardPreference.savingsMode),
+    [monthTransactions, categories, dashboardPreference.savingsMode]);
 
   // Month navigation helpers
   const handlePrevMonth = () => {
@@ -143,59 +126,81 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </button>
       </div>
 
+      {budgetAvailable && <div className="space-y-2">
+        <div role="group" aria-label="Monatsansicht" className="grid grid-cols-2 gap-1 rounded-2xl glass-surface p-1">
+          {([['calendar', 'Kalendermonat'], ['budget', 'Budgetmonat']] as const).map(([mode, label]) =>
+            <button key={mode} type="button" aria-pressed={mode === 'budget' ? budgetView : !budgetView}
+              onClick={() => setCalendarView(mode === 'calendar')}
+              className={`min-h-12 min-w-0 rounded-xl px-2 py-2 text-sm font-semibold ${((mode === 'budget') === budgetView) ? 'bg-ios-tint text-white' : 'text-slate-700 dark:text-slate-300'}`}>{label}</button>)}
+        </div>
+        <p className="text-xs text-ios-gray">{budgetView
+          ? `Von Gehalt zu Gehalt: ${formatDay(period!.start)} – ${formatDay(dayBefore(period!.end))}. Ohne Gehalt ab dem ${preference.startDay}. gilt die Monatsgrenze.`
+          : 'Kalendermonat: Einnahmen und Ausgaben nach Buchungsdatum.'}</p>
+      </div>}
+
       {/* Main KPI Cards Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+      <div className={`grid grid-cols-2 ${lgColumns} gap-2.5 sm:gap-4`}>
         {/* Real Account Balance Card */}
-        <div className="glass-surface glass-kpi">
+        <div className={`glass-surface glass-kpi ${spanBalance ? 'col-span-2 lg:col-span-1' : ''}`}>
           <div className="flex items-center justify-between text-ios-gray mb-1">
-            <span className="text-xs font-semibold">Kontostand</span>
+            <span className="text-xs font-semibold">{isPastMonth ? 'Kontostand aktuell' : 'Kontostand'}</span>
             <Landmark className="w-4 h-4 text-ios-tint" />
           </div>
           <div className="glass-kpi-value text-slate-900 dark:text-white tracking-tight">
             {realBalance.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
           </div>
           <p className="text-[10px] text-ios-gray mt-1 truncate">
-            {account?.checkpointDate ? `per ${account.checkpointDate} (aus comdirect)` : 'aus Startsaldo'}
+            {carriedTo ? `fortgeschrieben bis ${formatDay(carriedTo)}`
+              : account?.checkpointDate ? `comdirect-Saldo vom ${formatDay(account.checkpointDate)}` : 'aus Startsaldo'}
           </p>
         </div>
 
+        {/* Balance at the end of the selected, completed month */}
+        {isPastMonth && <div className="glass-surface glass-kpi">
+          <div className="flex items-center justify-between text-ios-gray mb-1">
+            <span className="text-xs font-semibold">Kontostand Monatsende</span>
+            <Landmark className="w-4 h-4 text-ios-gray" />
+          </div>
+          <div className="glass-kpi-value text-slate-900 dark:text-white tracking-tight">
+            {monthEndBalance === null ? '–' : `${monthEndBalance.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €`}
+          </div>
+          <p className="text-[10px] text-ios-gray mt-1 truncate">
+            {monthEndBalance === null
+              ? `vor dem Startsaldo${account?.initialBalanceDate ? ` (${new Date(`${account.initialBalanceDate}T12:00:00`).toLocaleDateString('de-DE')})` : ''}`
+              : `am ${new Date(`${selectedMonthEnd}T12:00:00`).toLocaleDateString('de-DE')}`}
+          </p>
+          {monthEndBeforeData && <p className="text-[10px] text-amber-700 dark:text-amber-300 mt-0.5"
+            title={`Vor der ersten importierten Buchung (${new Date(`${firstBookingDate}T12:00:00`).toLocaleDateString('de-DE')}) – aus späteren Daten zurückgerechnet.`}>
+            vor erster Buchung, zurückgerechnet
+          </p>}
+        </div>}
+
         {/* Net Cashflow / Monatssaldo */}
-        <div className="glass-kpi glass-kpi-cashflow relative overflow-hidden">
+        {showMonthResult && <div className={`glass-kpi glass-kpi-cashflow relative overflow-hidden ${spanResult ? 'col-span-2 lg:col-span-1' : ''}`}>
           <div className="flex justify-between items-start text-xs font-semibold text-slate-400">
-            <span>Cashflow (Monat)</span>
+            <span>{budgetView ? 'Budgetsaldo (Monat)' : 'Cashflow (Monat)'}</span>
             <Wallet className="w-4 h-4 text-amber-300" />
           </div>
           <div className="mt-1">
             <div className={`glass-kpi-value tracking-tight ${balance >= 0 ? 'text-ios-green' : 'text-ios-red'}`}>
               {balance >= 0 ? '+' : ''}{balance.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
             </div>
+            {/* Einnahmen/Ausgaben gehören zum Monatsergebnis – eine Kachel statt drei. */}
+            <dl className="mt-2 space-y-0.5 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <dt className="flex items-center gap-1 text-slate-300"><TrendingUp aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-ios-green" /><span className="sr-only sm:not-sr-only">{budgetView ? 'Einnahmen (Budget)' : 'Einnahmen'}</span></dt>
+                <dd className="font-semibold tabular-nums whitespace-nowrap text-white">+{income.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €</dd>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <dt className="flex items-center gap-1 text-slate-300"><TrendingDown aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-ios-red" /><span className="sr-only sm:not-sr-only">Ausgaben</span></dt>
+                <dd className="font-semibold tabular-nums whitespace-nowrap text-white">-{expense.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €</dd>
+              </div>
+            </dl>
             <p className="text-[10px] text-slate-300 mt-1">
               Sparquote: <span className="font-bold text-white">{savingsRate}%</span>
             </p>
           </div>
-        </div>
-
-        {/* Income Card */}
-        <div className="glass-surface glass-kpi">
-          <div className="flex items-center justify-between text-ios-gray mb-1">
-            <span className="text-xs font-medium">Einnahmen</span>
-            <TrendingUp className="w-4 h-4 text-ios-green" />
-          </div>
-          <div className="glass-kpi-value text-slate-900 dark:text-white">
-            +{income.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
-          </div>
-        </div>
-
-        {/* Expense Card */}
-        <div className="glass-surface glass-kpi">
-          <div className="flex items-center justify-between text-ios-gray mb-1">
-            <span className="text-xs font-medium">Ausgaben</span>
-            <TrendingDown className="w-4 h-4 text-ios-red" />
-          </div>
-          <div className="glass-kpi-value text-slate-900 dark:text-white">
-            -{expense.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
-          </div>
-        </div>
+        </div>}
       </div>
 
       {/* Category Breakdown Card */}
@@ -212,7 +217,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <DonutChart
           slices={categorySlices}
           currency="€"
-          onSelectCategory={onSelectCategoryFilter}
+          surplusSlices={surplusSlices}
+          onSelectCategory={catId => onSelectCategoryFilter(catId, period ?? undefined)}
         />
       </div>
 

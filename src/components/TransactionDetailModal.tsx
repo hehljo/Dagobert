@@ -13,7 +13,7 @@ interface TransactionDetailModalProps {
   existingTransactions?: Transaction[];
   onClose: () => void;
   onSave: (transaction: Transaction) => void | Promise<void>;
-  onDelete?: (id: number) => void | Promise<void>;
+  onDelete?: (id: number | string) => void | Promise<void>;
   onCategoryCreated?: (category: Category) => void;
 }
 

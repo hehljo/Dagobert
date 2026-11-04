@@ -1,12 +1,14 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'de.dagobert.app',
+  appId: 'de.lupfa.dagobert',
   appName: 'Dagobert',
   webDir: 'dist',
+  loggingBehavior: 'none',
   bundledWebRuntime: false,
   ios: {
-    contentInset: 'automatic',
+    // CSS owns the safe areas; UIKit must not add the same insets a second time.
+    contentInset: 'never',
     preferredContentMode: 'mobile',
     scheme: 'App'
   }

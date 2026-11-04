@@ -47,6 +47,15 @@ db.pragma('foreign_keys = ON');
 
 export function initDatabase() {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS portable_fields (
+      profile_id TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      PRIMARY KEY(profile_id, entity_type, entity_id)
+    );
+    CREATE TABLE IF NOT EXISTS recovery_snapshots (id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, payload TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS portable_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS profiles (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

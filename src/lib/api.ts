@@ -105,7 +105,7 @@ export async function exportProfileBackup(profileId: string, includeAllProfiles 
   return getRepository().exportBackup(profileId, includeAllProfiles);
 }
 
-export async function importProfileBackup(profileId: string, data: any, mode: BackupImportMode = 'replace'): Promise<void> {
+export async function importProfileBackup(profileId: string, data: BackupPayload, mode: BackupImportMode = 'replace'): Promise<void> {
   return getRepository().importBackup(profileId, data, mode);
 }
 

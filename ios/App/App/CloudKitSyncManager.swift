@@ -1,300 +1,254 @@
 import Foundation
 import CloudKit
 
-public final class CloudKitSyncManager: NSObject {
-    public static let shared = CloudKitSyncManager()
+// UI-independent native owner. SQLite persists financial records, the outbox, and engine state.
+actor CloudKitSyncManager: CKSyncEngineDelegate {
+    static let shared = CloudKitSyncManager()
+    private let container = CKContainer(identifier: "iCloud.de.dagobert.app")
+    private let zoneID = CKRecordZone.ID(zoneName: "DagobertZone", ownerName: CKCurrentUserDefaultName)
+    private var engine: CKSyncEngine?
+    private var initializing = false
+    private var prepared = false
+    private var manualSyncing = false
+    private var persistenceFailed = false
+    private var lastError: String?
+    private var state = "disabled"
+    private var activeAccount: String?
+    private var eventFailed = false
 
-    public static let zoneName = "DagobertZone"
-    public static let customZoneID = CKRecordZone.ID(zoneName: zoneName, ownerName: CKCurrentUserDefaultName)
-
-    private let container: CKContainer
-    private let database: CKDatabase
-    private let queue = DispatchQueue(label: "de.dagobert.cloudkit", qos: .utility)
-
-    private(set) public var isSyncing: Bool = false
-    private(set) public var lastSyncDate: Date? = nil
-    private(set) public var lastError: String? = nil
-
-    private override init() {
-        self.container = CKContainer.default()
-        self.database = self.container.privateCloudDatabase
-        super.init()
-    }
-
-    public var isEnabled: Bool {
-        get {
-            return UserDefaults.standard.bool(forKey: "dagobert_icloud_sync_enabled")
+    private func database() throws -> DagobertDatabase { try DagobertDatabase.sharedStore() }
+    private func enabled() throws -> Bool { try database().metadata("syncEnabled") == "1" }
+    private func account() async throws -> String {
+        guard try await container.accountStatus() == .available else {
+            throw DagobertDatabase.StoreError(message: "iCloud ist nicht angemeldet oder nicht verfügbar. Alle lokalen Daten bleiben nutzbar.")
         }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "dagobert_icloud_sync_enabled")
-            if newValue {
-                setupZoneAndSync()
-            }
+        return try await container.userRecordID().recordName
+    }
+    private func checkAccount(_ current: String) throws {
+        if let bound = try database().metadata("cloudAccount"), bound != current {
+            throw DagobertDatabase.StoreError(message: "Der Apple-Account wurde gewechselt. Die Daten des bisherigen Accounts bleiben lokal; ein Upload in den neuen Account ist gesperrt.")
         }
     }
-
-    public func getAccountStatus(completion: @escaping (CKAccountStatus, Error?) -> Void) {
-        container.accountStatus { status, error in
-            DispatchQueue.main.async {
-                completion(status, error)
-            }
-        }
+    private func initialize() async throws -> CKSyncEngine {
+        guard try enabled() else { throw DagobertDatabase.StoreError(message: "iCloud-Synchronisierung ist deaktiviert.") }
+        let current = try await account()
+        try checkAccount(current)
+        if let engine, activeAccount == current, !persistenceFailed, prepared { return engine }
+        guard !initializing else { throw DagobertDatabase.StoreError(message: "iCloud wird gerade vorbereitet. Bitte kurz warten.") }
+        initializing = true
+        defer { initializing = false; if !prepared { engine = nil } }
+        prepared = false
+        let db = try database()
+        let serialization = try db.metadata("engineState").flatMap { $0.data(using: .utf8) }.map { try JSONDecoder().decode(CKSyncEngine.State.Serialization.self, from: $0) }
+        var configuration = CKSyncEngine.Configuration(database: container.privateCloudDatabase, stateSerialization: serialization, delegate: self)
+        // Merge existing cloud data before scheduling any upload on first activation/restart.
+        configuration.automaticallySync = false
+        let initial = CKSyncEngine(configuration)
+        engine = initial; activeAccount = current; persistenceFailed = false; eventFailed = false
+        if try db.metadata("cloudAccount") == nil { try db.setMetadata("cloudAccount", current) }
+        try await initial.fetchChanges()
+        guard engine === initial, !persistenceFailed, !eventFailed else { throw DagobertDatabase.StoreError(message: lastError ?? "iCloud konnte nicht sicher vorbereitet werden.") }
+        let latest = try db.metadata("engineState").flatMap { $0.data(using: .utf8) }.map { try JSONDecoder().decode(CKSyncEngine.State.Serialization.self, from: $0) }
+        configuration.stateSerialization = latest
+        configuration.automaticallySync = true
+        let automatic = CKSyncEngine(configuration)
+        engine = automatic; prepared = true
+        automatic.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: zoneID))])
+        try queuePending(automatic, db: db)
+        return automatic
     }
-
-    // MARK: - Zone Setup
-
-    public func setupZone(completion: @escaping (Bool, Error?) -> Void) {
-        let zone = CKRecordZone(zoneID: CloudKitSyncManager.customZoneID)
-        let op = CKModifyRecordZonesOperation(recordZonesToSave: [zone], recordZoneIDsToDelete: nil)
-        op.modifyRecordZonesResultBlock = { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success:
-                    completion(true, nil)
-                case .failure(let error):
-                    let ckErr = error as? CKError
-                    if ckErr?.code == .partialFailure || ckErr?.code == .zoneNotFound {
-                        completion(true, nil)
-                    } else {
-                        completion(false, error)
-                    }
-                }
-            }
-        }
-        op.database = database
-        OperationQueue().addOperation(op)
-    }
-
-    // MARK: - Synchronize Flow
-
-    public func setupZoneAndSync() {
-        guard isEnabled else { return }
-        getAccountStatus { [weak self] status, _ in
-            guard status == .available else {
-                self?.lastError = "iCloud ist auf diesem Gerät nicht verfügbar oder nicht angemeldet."
-                return
-            }
-            self?.setupZone { success, error in
-                if success {
-                    self?.performSync()
-                } else {
-                    self?.lastError = error?.localizedDescription
-                }
-            }
-        }
-    }
-
-    public func performSync(completion: ((Bool, String?) -> Void)? = nil) {
-        queue.async { [weak self] in
-            guard let self = self else { return }
-            guard self.isEnabled else {
-                DispatchQueue.main.async { completion?(false, "iCloud-Sync ist deaktiviert.") }
-                return
-            }
-            guard !self.isSyncing else {
-                DispatchQueue.main.async { completion?(true, "Sync läuft bereits.") }
-                return
-            }
-
-            self.isSyncing = true
-            self.lastError = nil
-
-            self.uploadPendingChanges { [weak self] upSuccess, upErr in
-                guard let self = self else { return }
-                if !upSuccess {
-                    self.isSyncing = false
-                    self.lastError = upErr
-                    DispatchQueue.main.async { completion?(false, upErr) }
-                    return
-                }
-
-                self.fetchServerChanges { [weak self] downSuccess, downErr in
-                    guard let self = self else { return }
-                    self.isSyncing = false
-                    if downSuccess {
-                        self.lastSyncDate = Date()
-                        self.lastError = nil
-                        DispatchQueue.main.async { completion?(true, nil) }
-                    } else {
-                        self.lastError = downErr
-                        DispatchQueue.main.async { completion?(false, downErr) }
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Upload
-
-    private func uploadPendingChanges(completion: @escaping (Bool, String?) -> Void) {
-        let pending = DagobertDatabase.shared.getPendingSyncRecords()
-        guard !pending.isEmpty else {
-            completion(true, nil)
+    func setEnabled(_ value: Bool) async throws {
+        let db = try database()
+        if !value {
+            try db.setMetadata("syncEnabled", "0")
+            let old = engine; engine = nil; activeAccount = nil; prepared = false
+            await old?.cancelOperations()
+            state = "disabled"; lastError = nil
             return
         }
-
-        var recordsToSave = [CKRecord]()
-        var recordIDsToDelete = [CKRecord.ID]()
-        var processedTuples = [(recordType: String, recordId: String)]()
-
-        for item in pending {
-            let recordID = CKRecord.ID(recordName: "\(item.recordType)_\(item.recordId)", zoneID: CloudKitSyncManager.customZoneID)
-
-            if item.operation == "DELETE" {
-                recordIDsToDelete.append(recordID)
-                processedTuples.append((item.recordType, item.recordId))
-            } else {
-                // Construct record from local DB
-                let record = CKRecord(recordType: item.recordType, recordID: recordID)
-                record["entityId"] = item.recordId as CKRecordValue
-                record["updatedAt"] = ISO8601DateFormatter().string(from: Date()) as CKRecordValue
-
-                recordsToSave.append(record)
-                processedTuples.append((item.recordType, item.recordId))
-            }
-        }
-
-        let modifyOp = CKModifyRecordsOperation(recordsToSave: recordsToSave, recordIDsToDelete: recordIDsToDelete)
-        modifyOp.savePolicy = .changedKeys
-        modifyOp.database = database
-
-        modifyOp.modifyRecordsResultBlock = { result in
-            switch result {
-            case .success:
-                DagobertDatabase.shared.clearSyncQueue(records: processedTuples)
-                completion(true, nil)
-            case .failure(let error):
-                let ckErr = error as? CKError
-                if let retrySeconds = ckErr?.retryAfterSeconds {
-                    completion(false, "CloudKit Rate-Limit: Bitte in \(Int(retrySeconds))s erneut versuchen.")
-                } else {
-                    completion(false, error.localizedDescription)
-                }
-            }
-        }
-
-        OperationQueue().addOperation(modifyOp)
+        // An explicit user action enables sync. Never clear the account binding to make it work.
+        try db.setMetadata("syncEnabled", "1")
+        do { _ = try await initialize(); state = "idle"; lastError = nil }
+        catch { state = "error"; lastError = message(error); throw DagobertDatabase.StoreError(message: lastError!) }
     }
-
-    // MARK: - Download Server Changes
-
-    private func fetchServerChanges(completion: @escaping (Bool, String?) -> Void) {
-        var token: CKServerChangeToken? = nil
-        if let tokenStr = DagobertDatabase.shared.getSyncState(key: "ck_server_change_token"),
-           let tokenData = Data(base64Encoded: tokenStr) {
-            token = try? NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: tokenData)
-        }
-
-        let zoneConfig = CKFetchRecordZoneChangesOperation.ZoneConfiguration()
-        zoneConfig.previousServerChangeToken = token
-
-        let fetchOp = CKFetchRecordZoneChangesOperation(recordZoneIDs: [CloudKitSyncManager.customZoneID], configurationsByRecordZoneID: [CloudKitSyncManager.customZoneID: zoneConfig])
-
-        fetchOp.recordWasChangedBlock = { recordID, result in
-            switch result {
-            case .success(let record):
-                // Apply remote record to local database idempotently
-                _ = record
-            case .failure(let error):
-                #if DEBUG
-                print("CloudKit fetch change record error: \(error)")
-                #endif
-            }
-        }
-
-        fetchOp.recordWithIDWasDeletedBlock = { recordID, _ in
-            let name = recordID.recordName
-            let parts = name.split(separator: "_", maxSplits: 1)
-            if parts.count == 2 {
-                let type = String(parts[0])
-                let id = String(parts[1])
-                if type == "Transaction" {
-                    _ = DagobertDatabase.shared.deleteTransaction(id: id)
-                }
-            }
-        }
-
-        fetchOp.recordZoneFetchResultBlock = { zoneID, result in
-            switch result {
-            case .success(let (serverChangeToken, _, _)):
-                if let data = try? NSKeyedArchiver.archivedData(withRootObject: serverChangeToken, requiringSecureCoding: true) {
-                    DagobertDatabase.shared.setSyncState(key: "ck_server_change_token", value: data.base64EncodedString())
-                }
-            case .failure(let error):
-                #if DEBUG
-                print("CloudKit recordZoneFetchResultBlock error: \(error)")
-                #endif
-            }
-        }
-
-        fetchOp.fetchRecordZoneChangesResultBlock = { result in
-            switch result {
-            case .success:
-                completion(true, nil)
-            case .failure(let error):
-                let ckErr = error as? CKError
-                if ckErr?.code == .changeTokenExpired {
-                    DagobertDatabase.shared.setSyncState(key: "ck_server_change_token", value: "")
-                    completion(false, "Sync-Token abgelaufen, nächster Sync lädt voll neu.")
-                } else {
-                    completion(false, error.localizedDescription)
-                }
-            }
-        }
-
-        fetchOp.database = database
-        OperationQueue().addOperation(fetchOp)
+    func localChangesAvailable() async {
+        do {
+            guard try enabled() else { return }
+            let engine = try await initialize()
+            try queuePending(engine, db: database())
+        } catch { state = "error"; lastError = message(error) }
     }
-
-    // MARK: - Status Dictionary for JS
-
-    public func getStatusDictionary(completion: @escaping ([String: Any]) -> Void) {
-        getAccountStatus { [weak self] status, _ in
-            guard let self = self else { return }
-
-            let accountStatusStr: String
-            switch status {
-            case .available: accountStatusStr = "available"
-            case .noAccount: accountStatusStr = "noAccount"
-            case .restricted: accountStatusStr = "restricted"
-            case .couldNotDetermine: accountStatusStr = "couldNotDetermine"
-            case .temporarilyUnavailable: accountStatusStr = "temporarilyUnavailable"
-            @unknown default: accountStatusStr = "couldNotDetermine"
-            }
-
-            let stateStr: String
-            if !self.isEnabled {
-                stateStr = "disabled"
-            } else if status != .available {
-                stateStr = "offline"
-            } else if self.isSyncing {
-                stateStr = "syncing"
-            } else if self.lastError != nil {
-                stateStr = "error"
-            } else {
-                stateStr = "idle"
-            }
-
-            var dict: [String: Any] = [
-                "enabled": self.isEnabled,
-                "state": stateStr,
-                "pendingChangesCount": DagobertDatabase.shared.countPendingSync(),
-                "iCloudAccountStatus": accountStatusStr
-            ]
-
-            if let d = self.lastSyncDate {
-                dict["lastSyncAt"] = ISO8601DateFormatter().string(from: d)
-            } else {
-                dict["lastSyncAt"] = NSNull()
-            }
-
-            if let err = self.lastError {
-                dict["errorMessage"] = err
-            } else {
-                dict["errorMessage"] = NSNull()
-            }
-
-            completion(dict)
+    func synchronize() async throws {
+        guard !manualSyncing else { throw DagobertDatabase.StoreError(message: "Synchronisierung läuft bereits.") }
+        manualSyncing = true; state = "syncing"; eventFailed = false
+        defer { manualSyncing = false }
+        do {
+            let engine = try await initialize()
+            try await engine.fetchChanges()
+            guard self.engine === engine, !persistenceFailed, !eventFailed else { throw DagobertDatabase.StoreError(message: lastError ?? "Synchronisierung wurde unterbrochen.") }
+            try queuePending(engine, db: database())
+            try await engine.sendChanges()
+            try await engine.fetchChanges()
+            guard self.engine === engine, !persistenceFailed, !eventFailed else { throw DagobertDatabase.StoreError(message: lastError ?? "Synchronisierung konnte nicht abgeschlossen werden.") }
+            let db = try database()
+            if try !db.conflicts().isEmpty { throw DagobertDatabase.StoreError(message: "Es gibt widersprüchliche Änderungen. Bitte die gespeicherten Versionen prüfen.") }
+            if try db.pendingCount() == 0 { try db.setMetadata("lastSyncAt", DagobertDatabase.now()) }
+            state = "idle"; lastError = nil
+        } catch {
+            state = "error"; lastError = message(error)
+            throw DagobertDatabase.StoreError(message: lastError!)
         }
+    }
+    private func queuePending(_ engine: CKSyncEngine, db: DagobertDatabase) throws {
+        engine.state.add(pendingRecordZoneChanges: try db.pending().map { .saveRecord(CKRecord.ID(recordName: $0.recordID, zoneID: zoneID)) })
+    }
+    func nextRecordZoneChangeBatch(_ context: CKSyncEngine.SendChangesContext, syncEngine: CKSyncEngine) async -> CKSyncEngine.RecordZoneChangeBatch? {
+        guard engine === syncEngine, !persistenceFailed else { return nil }
+        do {
+            guard try enabled() else { return nil }
+            let current = try await account(); try checkAccount(current)
+            let db = try database()
+            let pending = try db.pending()
+            let lookup = Dictionary(uniqueKeysWithValues: pending.map { ($0.recordID, $0) })
+            let changes = Array(syncEngine.state.pendingRecordZoneChanges.filter { context.options.scope.contains($0) }.prefix(200))
+            var batchRecords = [CKRecord.ID: CKRecord]()
+            for change in changes {
+                guard case .saveRecord(let recordID) = change else { continue }
+                guard let item = lookup[recordID.recordName] else {
+                    syncEngine.state.remove(pendingRecordZoneChanges: [.saveRecord(recordID)]); continue
+                }
+                let record: CKRecord
+                if let fields = item.systemFields, !fields.isEmpty {
+                    let unarchiver = try NSKeyedUnarchiver(forReadingFrom: fields)
+                    unarchiver.requiresSecureCoding = true
+                    defer { unarchiver.finishDecoding() }
+                    guard let saved = CKRecord(coder: unarchiver) else { throw DagobertDatabase.StoreError(message: "CloudKit-Metadaten sind ungültig.") }
+                    record = saved
+                } else { record = CKRecord(recordType: "DagobertEntity", recordID: recordID) }
+                let data = Data(try DagobertDatabase.json(item.envelope).utf8)
+                guard data.count <= 700_000 else { throw DagobertDatabase.StoreError(message: "Ein Datensatz ist zu groß für iCloud. Seine lokale Kopie bleibt erhalten.") }
+                record.encryptedValues["payloadEncrypted"] = data as NSData
+                batchRecords[recordID] = record
+            }
+            let snapshot = batchRecords
+            return await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: changes) { snapshot[$0] }
+        } catch {
+            eventFailed = true; lastError = message(error); state = "error"
+            return nil
+        }
+    }
+    func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
+        guard engine === syncEngine else { return }
+        do {
+            let db = try database()
+            switch event {
+            case .stateUpdate(let update):
+                guard !persistenceFailed, !eventFailed, try enabled() else { return }
+                let bytes = try JSONEncoder().encode(update.stateSerialization)
+                guard let text = String(data: bytes, encoding: .utf8) else { throw DagobertDatabase.StoreError(message: "Sync-Zustand konnte nicht gespeichert werden.") }
+                try db.setMetadata("engineState", text)
+            case .accountChange(let change):
+                switch change.changeType {
+                case .signIn(let id):
+                    try checkAccount(id.recordName)
+                case .signOut, .switchAccounts:
+                    // Preserve bound account, outbox, and all financial data. Never auto-transfer.
+                    self.engine = nil; activeAccount = nil
+                    try db.setMetadata("engineState", nil)
+                    state = "error"; lastError = "Der iCloud-Account hat sich geändert. Die Synchronisierung wurde angehalten; deine lokalen Daten bleiben erhalten."
+                    await syncEngine.cancelOperations()
+                @unknown default:
+                    throw DagobertDatabase.StoreError(message: "Unbekannter iCloud-Accountzustand. Synchronisierung bleibt angehalten.")
+                }
+            case .fetchedRecordZoneChanges(let fetched):
+                try db.transaction {
+                    for modification in fetched.modifications {
+                        let record = modification.record
+                        guard record.recordType == "DagobertEntity" else { continue }
+                        let envelope = try decode(record)
+                        try db.applyRemote(envelope, recordID: record.recordID.recordName, systemFields: systemFields(record))
+                    }
+                    for deletion in fetched.deletions { try db.serverDeleted(deletion.recordID.recordName) }
+                }
+                try queuePending(syncEngine, db: db)
+            case .sentRecordZoneChanges(let sent):
+                for record in sent.savedRecords {
+                    let envelope = try decode(record)
+                    guard let changeID = envelope["changeId"] as? String else { throw DagobertDatabase.StoreError(message: "Ungültige Sync-Bestätigung.") }
+                    try db.acknowledge(record.recordID.recordName, changeID: changeID, systemFields: systemFields(record), sentEnvelope: envelope)
+                }
+                for failed in sent.failedRecordSaves {
+                    if failed.error.code == .serverRecordChanged, let remote = failed.error.serverRecord {
+                        try db.applyRemote(decode(remote), recordID: remote.recordID.recordName, systemFields: systemFields(remote))
+                    } else if [.zoneNotFound, .unknownItem].contains(failed.error.code) {
+                        // A missing zone/record may be a user deletion. Require an explicit decision.
+                        try db.setMetadata("syncEnabled", "0")
+                        self.engine = nil
+                        lastError = "iCloud-Daten wurden entfernt. Lokale Daten bleiben erhalten. Bitte vor erneutem Aktivieren ein Backup exportieren."
+                        state = "error"; eventFailed = true
+                    } else { eventFailed = true; lastError = message(failed.error); state = "error" }
+                }
+                if engine === syncEngine { try queuePending(syncEngine, db: db) }
+            case .sentDatabaseChanges(let sent):
+                if !sent.failedZoneSaves.isEmpty || !sent.failedZoneDeletes.isEmpty {
+                    eventFailed = true; state = "error"
+                    lastError = "Der iCloud-Datenbereich konnte nicht aktualisiert werden. Deine lokalen Daten bleiben erhalten."
+                }
+            case .fetchedDatabaseChanges(let fetched):
+                if fetched.deletions.contains(where: { $0.zoneID == zoneID }) {
+                    try db.setMetadata("syncEnabled", "0"); self.engine = nil; eventFailed = true
+                    state = "error"; lastError = "Die iCloud-Daten wurden gelöscht. Deine lokalen Daten bleiben erhalten."
+                }
+            case .willFetchChanges, .willSendChanges:
+                state = "syncing"
+            case .didFetchChanges, .didSendChanges:
+                if !eventFailed && !persistenceFailed {
+                    state = "idle"
+                    if try db.pendingCount() == 0 { try db.setMetadata("lastSyncAt", DagobertDatabase.now()) }
+                }
+            default: break
+            }
+        } catch {
+            // Never advance fetch tokens after a failed local commit.
+            persistenceFailed = true; eventFailed = true; state = "error"; lastError = message(error)
+            self.engine = nil
+            await syncEngine.cancelOperations()
+        }
+    }
+    private func decode(_ record: CKRecord) throws -> [String: Any] {
+        guard let data = record.encryptedValues["payloadEncrypted"] as? Data,
+              let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw DagobertDatabase.StoreError(message: "iCloud-Daten konnten nicht entschlüsselt oder gelesen werden.") }
+        return envelope
+    }
+    private func systemFields(_ record: CKRecord) -> Data {
+        let archiver = NSKeyedArchiver(requiringSecureCoding: true)
+        record.encodeSystemFields(with: archiver); archiver.finishEncoding()
+        return archiver.encodedData
+    }
+    private func message(_ error: Error) -> String {
+        guard let ck = error as? CKError else { return error.localizedDescription }
+        switch ck.code {
+        case .networkFailure, .networkUnavailable: return "Offline: Änderungen bleiben lokal gespeichert und werden später synchronisiert."
+        case .quotaExceeded: return "Der iCloud-Speicher reicht nicht aus. Deine lokalen Daten bleiben erhalten."
+        case .requestRateLimited, .serviceUnavailable, .zoneBusy: return "iCloud ist vorübergehend ausgelastet. Die Synchronisierung wird später fortgesetzt."
+        case .notAuthenticated, .accountTemporarilyUnavailable: return "iCloud ist nicht verfügbar. Bitte den Apple-Account in den Geräteeinstellungen prüfen."
+        default: return "Die iCloud-Synchronisierung konnte nicht abgeschlossen werden. Deine lokalen Daten bleiben erhalten."
+        }
+    }
+    func status() async throws -> [String: Any] {
+        let db = try database()
+        let isEnabled = try enabled()
+        let accountStatus: String
+        do {
+            switch try await container.accountStatus() {
+            case .available: accountStatus = "available"
+            case .noAccount: accountStatus = "noAccount"
+            case .restricted: accountStatus = "restricted"
+            default: accountStatus = "couldNotDetermine"
+            }
+        } catch { accountStatus = "couldNotDetermine" }
+        return ["enabled": isEnabled, "state": isEnabled ? state : "disabled", "lastSyncAt": try db.metadata("lastSyncAt") as Any? ?? NSNull(),
+            "pendingChangesCount": try db.pendingCount(), "errorMessage": lastError as Any? ?? NSNull(), "iCloudAccountStatus": accountStatus,
+            "conflictsCount": try db.conflicts().count]
     }
 }

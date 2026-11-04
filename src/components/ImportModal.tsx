@@ -1,32 +1,42 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Upload, FileText, CheckCircle2, AlertCircle, ArrowRight } from 'lucide-react';
-import type { BankTemplate, Category, CategoryRule, ImportPreviewRow, Transaction } from '../types/index.ts';
+import type { Account, BankTemplate, Category, CategoryRule, ImportPreviewRow, Transaction } from '../types/index.ts';
 import { parseBankCsv, decodeFileWithEncoding, extractComdirectMetadata } from '../lib/csvParser.ts';
 import type { CsvMetadata } from '../types/index.ts';
 import { autoCategorizePreview } from '../lib/rulesEngine.ts';
 import { batchImportTransactions } from '../lib/api.ts';
+import { ComdirectImportModal } from './ComdirectImportModal.tsx';
+import { possibleCrossSourceDuplicate } from '../lib/bankImport.ts';
 
 interface ImportModalProps {
   isOpen: boolean;
   profileId: string;
+  accounts: Account[];
   existingTransactions: Transaction[];
   onClose: () => void;
   bankTemplates: BankTemplate[];
   categories: Category[];
   rules: CategoryRule[];
   onImportComplete: (count: number) => void;
+  initialFile?: File;
+  /** Start directly in the comdirect fetch (stored access); "Zurück" still leads to the file import. */
+  initialDirect?: boolean;
 }
 
 export const ImportModal: React.FC<ImportModalProps> = ({
   isOpen,
   profileId,
+  accounts,
   existingTransactions,
   onClose,
   bankTemplates,
   categories,
   rules,
   onImportComplete,
+  initialFile,
+  initialDirect,
 }) => {
+  const [directImport, setDirectImport] = useState(!!initialDirect);
   const [selectedTemplateId, setSelectedTemplateId] = useState(bankTemplates[0]?.id || 'comdirect');
   const [encoding, setEncoding] = useState<'windows-1252' | 'utf-8'>('windows-1252');
   const [fileName, setFileName] = useState<string | null>(null);
@@ -36,19 +46,15 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [csvMetadata, setCsvMetadata] = useState<CsvMetadata | null>(null);
 
-  if (!isOpen) return null;
-
   const selectedTemplate = bankTemplates.find(t => t.id === selectedTemplateId) || bankTemplates[0];
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  async function readFile(file: File) {
     setFileName(file.name);
     setIsLoading(true);
     setErrorMsg(null);
 
     try {
+      if (!selectedTemplate) throw new Error('Bitte zuerst eine passende Bankvorlage einrichten.');
+      if (file.size > 50 * 1024 * 1024) throw new Error('Die Datei ist größer als 50 MB.');
       // 1. Decode with Windows-1252
       const text = await decodeFileWithEncoding(file, encoding);
 
@@ -83,6 +89,12 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       });
 
       for (const row of rawParsed) {
+        if (possibleCrossSourceDuplicate(row, selectedTemplate.name, existingTxs)) {
+          row.isDuplicate = true;
+          row.isPendingPromotion = false;
+          row.possibleDuplicate = true;
+          continue;
+        }
         if (row.status === 'booked') {
           const key = `${row.date}|${row.amount.toFixed(2)}|${row.payee.trim().toLowerCase()}`;
           const pendingList = pendingMap.get(key);
@@ -103,6 +115,15 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     } finally {
       setIsLoading(false);
     }
+  }
+  useEffect(() => { if (isOpen && initialFile) void readFile(initialFile); }, [initialFile, isOpen]);
+
+  if (!isOpen) return null;
+  if (directImport) return <ComdirectImportModal profileId={profileId} accounts={accounts} rules={rules}
+    onClose={onClose} onBack={() => setDirectImport(false)} onImportComplete={onImportComplete} />;
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) void readFile(file);
   };
 
   const handleCommitImport = async () => {
@@ -136,6 +157,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       const result = await batchImportTransactions(profileId, txs, csvMetadata || undefined);
       onImportComplete(result.inserted + result.updated);
       onClose();
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'Die Buchungen konnten nicht gespeichert werden. Bitte erneut versuchen.');
     } finally {
       setIsCommitting(false);
     }
@@ -147,7 +170,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   return (
     <div className="glass-overlay fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="glass-surface w-full max-w-2xl rounded-3xl p-6 shadow-2xl max-h-[90dvh] overflow-y-auto space-y-5 border border-ios-separator dark:border-ios-darkSeparator">
+      <div role="dialog" aria-modal="true" aria-label="Buchungen importieren" className="glass-surface w-full max-w-2xl rounded-3xl p-6 shadow-2xl max-h-[90dvh] overflow-y-auto space-y-5 border border-ios-separator dark:border-ios-darkSeparator">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
@@ -155,17 +178,24 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               <Upload className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="font-bold text-base text-slate-900 dark:text-white">Bank-CSV importieren</h2>
-              <p className="text-xs text-ios-gray">comdirect &amp; weitere Banken mit Encoding-Schutz</p>
+              <h2 className="font-bold text-base text-slate-900 dark:text-white">Buchungen importieren</h2>
+              <p className="text-xs text-ios-gray">CSV-Datei oder comdirect-Direktabruf</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="w-9 h-9 rounded-full bg-slate-100 dark:bg-neutral-800 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors"
+            aria-label="Schließen"
+            disabled={isCommitting || isLoading}
+            className="min-w-11 min-h-11 rounded-full bg-slate-100 dark:bg-neutral-800 flex items-center justify-center text-slate-500 hover:bg-slate-200 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {!initialFile && <button type="button" onClick={() => setDirectImport(true)} disabled={isLoading || isCommitting}
+          className="min-h-12 rounded-xl px-4 py-3 bg-ios-tint/10 text-ios-tint font-semibold text-sm w-full">
+          comdirect direkt abrufen – ohne CSV-Datei
+        </button>}
 
         {/* Configuration Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-slate-50 dark:bg-neutral-800/60 rounded-2xl text-xs">
@@ -275,6 +305,11 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                     <p className="text-[11px] text-ios-gray truncate">
                       {row.date} · {row.purpose}
                     </p>
+                    {row.possibleDuplicate && <label className="flex items-center gap-2 min-h-12 text-xs text-amber-600 dark:text-amber-400">
+                      <input type="checkbox" checked={!row.isDuplicate} disabled={isCommitting}
+                        onChange={e => setPreviewRows(old => old.map((r, i) => i === idx ? { ...r, isDuplicate: !e.target.checked } : r))} />
+                      Möglicherweise per Direktabruf vorhanden. Als zusätzliche Buchung importieren
+                    </label>}
                   </div>
 
                   <div className="text-right flex-shrink-0">
@@ -289,7 +324,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                       )}
                       <select
                         value={row.category}
-                        disabled={row.isDuplicate}
+                        disabled={row.isDuplicate || isCommitting}
+                        aria-label={`Kategorie für ${row.payee}`}
                         onChange={(e) => {
                           const updated = [...previewRows];
                           updated[idx].category = e.target.value;
@@ -310,6 +346,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             <div className="flex items-center space-x-3 pt-2">
               <button
                 onClick={() => setPreviewRows([])}
+                disabled={isCommitting}
                 className="py-3 px-4 rounded-2xl bg-slate-100 dark:bg-neutral-800 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-200"
               >
                 Andere Datei

@@ -4,6 +4,8 @@ import { chromium } from 'playwright';
 import { startTestServer, request } from '../tests/helpers/server.mjs';
 import { writeTestResult } from '../tests/helpers/evidence.mjs';
 import { testCategorization } from './test-categorization.mjs';
+import { testImports } from './test-imports.mjs';
+import { testSettings } from './test-settings.mjs';
 
 const server = await startTestServer();
 let browser;
@@ -33,6 +35,7 @@ async function newContext(options = {}) {
 
 try {
   browser = await chromium.launch({ headless: true });
+  if (!process.argv.includes('--imports-only') && !process.argv.includes('--settings-only')) {
   const month = new Date().toISOString().slice(0, 7);
   await api('/api/transactions/batch', 'POST', {
     profileId: 'privat',
@@ -122,6 +125,7 @@ try {
   record('save_waits_and_retains_input', 'Speichervorgang wird abgewartet; bei Fehler bleiben Eingaben erhalten; Wiederholung speichert genau einmal');
 
   await page.getByRole('button', { name: 'Einstellungen', exact: true }).click();
+  await page.locator('[data-settings-section="security"] summary').click();
   await page.getByRole('button', { name: 'App-Sperre aktivieren', exact: true }).click();
   await page.getByLabel('Neue App-PIN', { exact: true }).fill('2468');
   await page.getByRole('button', { name: 'PIN speichern', exact: true }).click();
@@ -209,7 +213,7 @@ try {
   await switchPage.goto(server.url);
   await dashboard(switchPage);
   await switchPage.getByTitle('Profil wechseln').click();
-  await switchPage.getByRole('button', { name: /Firma Test/ }).click();
+  await switchPage.getByRole('button', { name: /Firma Test/ }).filter({ hasNot: switchPage.locator('svg.lucide-pencil') }).click();
   await shown(switchPage.getByLabel('Profil-PIN', { exact: true }));
   await switchPage.route('**/api/profiles/*/unlock', route => route.fulfill({ status: 503, json: {} }));
   await switchPage.getByLabel('Profil-PIN', { exact: true }).fill('2468');
@@ -222,6 +226,9 @@ try {
   record('profile_switch_retry_isolation', 'Profilwechsel: Netzwerkfehler abfangen, erneut entsperren, vorherige Profildaten entfernt');
   await switchContext.close();
   await testCategorization({ api, newContext, record, url: server.url });
+  }
+  if (process.argv.includes('--settings-only')) await testSettings({ api, newContext, record, url: server.url });
+  else await testImports({ api, newContext, record, url: server.url });
   assert.deepEqual(errors, [], 'Keine JavaScript- oder React-Hook-Fehler');
   complete = true;
   console.log(`BROWSER_RESULT checks=${checks} errors=${errors.length}; echte lokale Test-API, injizierte Verbindungsfehler`);

@@ -13,7 +13,9 @@
     "test": "vitest run src/tests && node --test tests/*.test.mjs && node scripts/test-spm-fork.mjs",
     "test:ui": "npm run build && node scripts/test-browser.mjs",
     "test:quality": "python3 scripts/check-quality.py",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:portable": "python3 scripts/test-portable.py",
+    "gates": "python3 scripts/run-all-gates.py"
   },
   "dependencies": {
     "@capacitor/core": "^8.6.0",

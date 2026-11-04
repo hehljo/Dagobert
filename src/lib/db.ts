@@ -1,116 +1,5 @@
-import standardRules from './standardRules.json';
-import { computeTransactionHash } from './csvParser.ts';
-import Dexie, { type Table } from 'dexie';
-import type { Transaction, Category, CategoryRule, BankTemplate, Account } from '../types/index.ts';
-
-export class DagobertDatabase extends Dexie {
-  transactions!: Table<Transaction, number>;
-  categories!: Table<Category, string>;
-  rules!: Table<CategoryRule, string>;
-  bankTemplates!: Table<BankTemplate, string>;
-  accounts!: Table<Account, string>;
-
-  constructor() {
-    super('DagobertDB');
-    this.version(1).stores({
-      transactions: '++id, date, category, account, sourceHash, amount',
-      categories: 'id, name, type',
-      rules: 'id, priority, enabled',
-      bankTemplates: 'id, name'
-    });
-    this.version(2).stores({
-      accounts: 'id, name'
-    });
-  }
-}
-
-export const db = new DagobertDatabase();
-
-export const DEFAULT_ACCOUNT: Account = {
-  id: 'comdirect',
-  name: 'comdirect Girokonto',
-  initialBalance: 0,
-  initialBalanceDate: '2026-01-01'
-};
-
-export const DEFAULT_CATEGORIES: Category[] = [
-  { id: 'lebensmittel', name: 'Lebensmittel & Supermarkt', icon: 'ShoppingCart', color: '#30D158', type: 'expense' },
-  { id: 'wohnen', name: 'Wohnen & Miete', icon: 'Home', color: '#0A84FF', type: 'expense' },
-  { id: 'mobilitaet', name: 'Mobilität & Transport', icon: 'Car', color: '#FF9F0A', type: 'expense' },
-  { id: 'freizeit', name: 'Freizeit & Restaurant', icon: 'Utensils', color: '#FF375F', type: 'expense' },
-  { id: 'abos', name: 'Abos & Verträge', icon: 'Smartphone', color: '#BF5AF2', type: 'expense' },
-  { id: 'shopping', name: 'Shopping & Kleidung', icon: 'ShoppingBag', color: '#FFD60A', type: 'expense' },
-  { id: 'gesundheit', name: 'Gesundheit & Pflege', icon: 'HeartPulse', color: '#64D2FF', type: 'expense' },
-  { id: 'investieren', name: 'Sparen & Investieren', icon: 'TrendingUp', color: '#5E5CE6', type: 'transfer' },
-  { id: 'gehalt', name: 'Gehalt & Einkommen', icon: 'Briefcase', color: '#32D74B', type: 'income' },
-  { id: 'rueckerstattung', name: 'Rückerstattungen', icon: 'RotateCcw', color: '#40C8E0', type: 'income' },
-  { id: 'sonstiges', name: 'Sonstiges', icon: 'Package', color: '#8E8E93', type: 'expense' }
-];
-
-export const COMDIRECT_TEMPLATE: BankTemplate = {
-  id: 'comdirect',
-  name: 'comdirect Girokonto',
-  description: 'Automatische Erkennung für comdirect CSV mit Windows-1252 & Textzerlegung',
-  encoding: 'windows-1252',
-  delimiter: ';',
-  headerIdentifier: 'Buchungstag',
-  columns: {
-    date: 'Buchungstag',
-    valutaDate: 'Wertstellung (Valuta)',
-    type: 'Vorgang',
-    rawText: 'Buchungstext',
-    amount: 'Umsatz in EUR'
-  },
-  textParser: 'comdirect',
-  dateFormat: 'DD.MM.YYYY'
-};
-
-// Shared with the server so new profiles and the preset loader use the same catalog.
-export const DEFAULT_RULES = standardRules.rules as CategoryRule[];
-
-export async function initDatabaseDefaults() {
-  const catCount = await db.categories.count();
-  if (catCount === 0) {
-    await db.categories.bulkAdd(DEFAULT_CATEGORIES);
-  } else {
-    // Migrate any legacy emoji icons to Lucide names
-    const existing = await db.categories.toArray();
-    for (const cat of existing) {
-      if (cat.icon && (cat.icon.length > 2 || /[\uD800-\uDBFF][\uDC00-\uDFFF]/.test(cat.icon))) {
-        const defaultMatch = DEFAULT_CATEGORIES.find(d => d.id === cat.id);
-        if (defaultMatch) {
-          await db.categories.update(cat.id, { icon: defaultMatch.icon });
-        }
-      }
-    }
-  }
-
-  const templateCount = await db.bankTemplates.count();
-  if (templateCount === 0) {
-    await db.bankTemplates.add(COMDIRECT_TEMPLATE);
-  }
-
-  const ruleCount = await db.rules.count();
-  if (ruleCount === 0) {
-    await db.rules.bulkAdd(DEFAULT_RULES);
-  }
-
-  const accountCount = await db.accounts.count();
-  if (accountCount === 0) {
-    await db.accounts.add(DEFAULT_ACCOUNT);
-  }
-  // Auto-migrate all legacy hashes to modern 64-bit BigInt hashes
-  const allTxs = await db.transactions.toArray();
-  for (const t of allTxs) {
-    if (t.id !== undefined) {
-      const expectedHash = computeTransactionHash(t.date, t.amount, t.rawText || t.purpose);
-      if (t.sourceHash !== expectedHash) {
-        await db.transactions.update(t.id, { sourceHash: expectedHash });
-      }
-    }
-  }
-
-}
+import type { Transaction, Account } from '../types/index.ts';
+export { DEFAULT_ACCOUNT, DEFAULT_CATEGORIES, DEFAULT_RULES, COMDIRECT_TEMPLATE } from '../data/defaults.ts';
 
 /**
  * Calculates current real account balance.
@@ -119,23 +8,88 @@ export async function initDatabaseDefaults() {
  * Otherwise:
  * current = initialBalance + sum(transactions where date >= initialBalanceDate)
  */
-export function calculateRealAccountBalance(account: Account | undefined, txs: Transaction[]): number {
-  if (!account) return 0;
-
+function bookedAccountTransactions(account: Account, txs: Transaction[]): Transaction[] {
   // STRICT ACCOUNT SCOPING: Only include transactions belonging to this account and exclude unbooked 'pending' items!
-  const accountTxs = txs.filter(t =>
-    (!t.account || t.account === account.name || t.account === account.id) &&
+  return txs.filter(t =>
+    (t.accountId ? t.accountId === account.id : (!t.account || t.account === account.name || t.account === account.id)) &&
     t.status !== 'pending'
   );
+}
 
-  if (account.checkpointBalance !== undefined && account.checkpointDate) {
+function sumCents(txs: Transaction[]): number {
+  return txs.reduce((sum, t) => sum + Math.round(t.amount * 100), 0);
+}
+
+/**
+ * Balance at the end of `date` (YYYY-MM-DD), derived from the same anchors as the current balance.
+ * Checkpoint: walks forward or backward from the comdirect balance. Without checkpoint, dates before
+ * the start balance are unknown and return null. Never changes stored data.
+ */
+export function calculateAccountBalanceAt(account: Account | undefined, txs: Transaction[], date: string): number | null {
+  if (!account || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const accountTxs = bookedAccountTransactions(account, txs);
+  if (typeof account.checkpointBalance === 'number' && account.checkpointDate) {
+    const checkpoint = account.checkpointDate;
+    const delta = date >= checkpoint
+      ? sumCents(accountTxs.filter(t => t.date > checkpoint && t.date <= date))
+      : -sumCents(accountTxs.filter(t => t.date > date && t.date <= checkpoint));
+    return (Math.round(account.checkpointBalance * 100) + delta) / 100;
+  }
+  if (date < account.initialBalanceDate) return null;
+  const delta = sumCents(accountTxs.filter(t => t.date >= account.initialBalanceDate && t.date <= date));
+  return (Math.round(account.initialBalance * 100) + delta) / 100;
+}
+
+/** Earliest booked transaction date of this account, or null without bookings. */
+export function firstBookedAccountDate(account: Account | undefined, txs: Transaction[]): string | null {
+  if (!account) return null;
+  let first: string | null = null;
+  for (const t of bookedAccountTransactions(account, txs)) if (first === null || t.date < first) first = t.date;
+  return first;
+}
+
+/** Latest booked transaction date of this account, or null without bookings. */
+export function lastBookedAccountDate(account: Account | undefined, txs: Transaction[]): string | null {
+  if (!account) return null;
+  let last: string | null = null;
+  for (const t of bookedAccountTransactions(account, txs)) if (last === null || t.date > last) last = t.date;
+  return last;
+}
+
+export interface MonthEndBalance { month: string; date: string; balance: number | null; current: boolean }
+
+/**
+ * Month-end balances for `count` months ending at `endMonth` (YYYY-MM). Months after `today`'s month are
+ * dropped; the running month uses the current balance instead of a month end that has not happened yet.
+ */
+export function monthEndBalances(account: Account | undefined, txs: Transaction[], endMonth: string, count: number, today: Date = new Date()): MonthEndBalance[] {
+  const running = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  const [endYear, endNumber] = endMonth.split('-').map(Number);
+  const result: MonthEndBalance[] = [];
+  for (let offset = count - 1; offset >= 0; offset--) {
+    const index = endYear * 12 + (endNumber - 1) - offset;
+    const month = `${String(Math.floor(index / 12)).padStart(4, '0')}-${String(index % 12 + 1).padStart(2, '0')}`;
+    if (month > running) continue;
+    const lastDay = new Date(Date.UTC(Math.floor(index / 12), index % 12 + 1, 0)).getUTCDate();
+    const date = `${month}-${String(lastDay).padStart(2, '0')}`;
+    const current = month === running;
+    result.push({ month, date, current, balance: current ? (account ? calculateRealAccountBalance(account, txs) : null) : calculateAccountBalanceAt(account, txs, date) });
+  }
+  return result;
+}
+
+export function calculateRealAccountBalance(account: Account | undefined, txs: Transaction[]): number {
+  if (!account) return 0;
+  const accountTxs = bookedAccountTransactions(account, txs);
+
+  if (typeof account.checkpointBalance === 'number' && account.checkpointDate) {
     // Only transactions AFTER checkpoint date
     const afterCheckpoint = accountTxs.filter(t => t.date > account.checkpointDate!);
-    const delta = afterCheckpoint.reduce((sum, t) => sum + t.amount, 0);
-    return account.checkpointBalance + delta;
+    const delta = afterCheckpoint.reduce((sum, t) => sum + Math.round(t.amount * 100), 0) / 100;
+    return (Math.round(account.checkpointBalance * 100) + Math.round(delta * 100)) / 100;
   }
 
   const fromInitial = accountTxs.filter(t => t.date >= account.initialBalanceDate);
-  const sum = fromInitial.reduce((sum, t) => sum + t.amount, 0);
-  return account.initialBalance + sum;
+  const sum = fromInitial.reduce((sum, t) => sum + Math.round(t.amount * 100), 0) / 100;
+  return (Math.round(account.initialBalance * 100) + Math.round(sum * 100)) / 100;
 }

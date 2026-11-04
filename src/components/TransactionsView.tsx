@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from 'react';
+import { dayBefore } from '../lib/salaryBudget.ts';
 import { Search, Filter, Calendar, X } from 'lucide-react';
 import type { Transaction, Category } from '../types/index.ts';
 import { CategoryIcon } from './CategoryIcon.tsx';
+import { compareTransactionIds } from '../data/identity.ts';
 
 interface TransactionsViewProps {
   transactions: Transaction[];
@@ -10,7 +12,11 @@ interface TransactionsViewProps {
   onClearCategoryFilter: () => void;
   onSelectTransaction: (tx: Transaction) => void;
   selectedMonth: string;
+  /** Budget period from the dashboard (start inclusive, end exclusive); replaces the calendar month. */
+  dateRange?: { start: string; end: string } | null;
 }
+
+const formatRangeDay = (date: string) => new Date(`${date}T12:00:00`).toLocaleDateString('de-DE');
 
 export const TransactionsView: React.FC<TransactionsViewProps> = ({
   transactions,
@@ -19,6 +25,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   onClearCategoryFilter,
   onSelectTransaction,
   selectedMonth,
+  dateRange = null,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'expense' | 'income'>('all');
@@ -33,7 +40,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   const filtered = useMemo(() => {
     return transactions.filter(t => {
       // Month
-      if (!showAllMonths && !t.date.startsWith(selectedMonth)) return false;
+      if (!showAllMonths && (dateRange ? t.date < dateRange.start || t.date >= dateRange.end : !t.date.startsWith(selectedMonth))) return false;
 
       // Type
       if (typeFilter === 'expense' && t.amount >= 0) return false;
@@ -54,8 +61,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       }
 
       return true;
-    }).sort((a, b) => b.date.localeCompare(a.date) || (b.id || 0) - (a.id || 0));
-  }, [transactions, selectedMonth, showAllMonths, onlyUncategorized, typeFilter, selectedCategoryFilter, searchTerm]);
+    }).sort((a, b) => b.date.localeCompare(a.date) || compareTransactionIds(a.id, b.id));
+  }, [transactions, selectedMonth, dateRange, showAllMonths, onlyUncategorized, typeFilter, selectedCategoryFilter, searchTerm]);
 
   // Group by Date
   const groupedByDate = useMemo(() => {
@@ -136,7 +143,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
           </button>
         </div>
         <p className="text-xs text-ios-gray" role="status">
-          {filtered.length.toLocaleString('de-DE')} Buchungen · {showAllMonths ? 'Alle Jahre' : selectedMonth}
+          {filtered.length.toLocaleString('de-DE')} Buchungen · {showAllMonths ? 'Alle Jahre' : dateRange ? `Budgetmonat ${formatRangeDay(dateRange.start)} – ${formatRangeDay(dayBefore(dateRange.end))}` : selectedMonth}
           {' · '}{uncategorizedCount.toLocaleString('de-DE')} unkategorisiert im Profil
         </p>
         <div className="flex flex-wrap items-center gap-2 text-xs">

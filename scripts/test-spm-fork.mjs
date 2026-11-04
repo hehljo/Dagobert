@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { syncSpmFork, UPSTREAM, FORK } from "./spm-fork.mjs";
@@ -32,16 +32,16 @@ try {
 
   // Sabotage 2: Fehlendes node_modules Plugin
   const source = await readFile(join(root, plugin), "utf8");
-  await rm(join(root, plugin));
+  await rename(join(root, plugin), join(root, 'plugin-held.swift'));
   await assert.rejects(syncSpmFork(root, true), /Run npm ci/);
   await write(plugin, source);
   await syncSpmFork(root, true);
 
   // Sabotage 3: Fehlende Package.resolved
-  await rm(join(root, lock));
+  await rename(join(root, lock), join(root, 'lock-held.json'));
   await assert.rejects(syncSpmFork(root, true), /ENOENT/);
 
   console.log("SPM_GATE_RESULT healthy=1 mutations=5 detected=5 failed=0");
 } finally {
-  await rm(root, { recursive: true, force: true });
+  if (process.env.DAGOBERT_KEEP_TEST_DATA !== '1') await rm(root, { recursive: true, force: true });
 }

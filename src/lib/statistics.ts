@@ -1,5 +1,6 @@
 import type { Category, Transaction } from '../types/index.ts';
 import { isValidCalendarDate } from './csvParser.ts';
+import { compareTransactionIds } from '../data/identity.ts';
 
 export interface StatisticsPeriod {
   year: number;
@@ -42,7 +43,7 @@ export function getStatisticsYears(transactions: Transaction[], currentYear: num
 
 export function largestTransactions(transactions: Transaction[]): Transaction[] {
   return [...transactions].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)
-    || b.date.localeCompare(a.date) || (b.id ?? 0) - (a.id ?? 0));
+    || b.date.localeCompare(a.date) || compareTransactionIds(a.id, b.id));
 }
 
 export function calculateStatistics(

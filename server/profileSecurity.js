@@ -27,7 +27,7 @@ export function createProfileSecurity(getProfile, hashPin) {
         const token = sessionToken(req);
         const session = sessions.get(token);
         if (!session || session.expiresAt <= Date.now() ||
-            session.profileId !== profileId || session.pinHash !== profile.pin_hash) {
+            session.grants.get(profileId) !== profile.pin_hash) {
           if (session?.expiresAt <= Date.now()) sessions.delete(token);
           return res.status(401).json({ error: 'Bitte das Profil mit der PIN entsperren' });
         }
@@ -60,13 +60,17 @@ export function createProfileSecurity(getProfile, hashPin) {
     }
 
     attempts.delete(profile.id);
-    sessions.delete(sessionToken(req));
+    const previousToken = sessionToken(req);
+    const previousSession = sessions.get(previousToken);
+    const grants = previousSession && previousSession.expiresAt > now ? new Map(previousSession.grants) : new Map();
+    grants.set(profile.id, profile.pin_hash);
+    sessions.delete(previousToken);
     for (const [token, session] of sessions) {
       if (session.expiresAt <= now) sessions.delete(token);
     }
     if (sessions.size >= 1000) sessions.delete(sessions.keys().next().value);
     const token = randomBytes(32).toString('hex');
-    sessions.set(token, { profileId: profile.id, pinHash: profile.pin_hash, expiresAt: now + SESSION_DURATION });
+    sessions.set(token, { grants, expiresAt: now + SESSION_DURATION });
     res.cookie(COOKIE_NAME, token, {
       httpOnly: true,
       sameSite: 'strict',

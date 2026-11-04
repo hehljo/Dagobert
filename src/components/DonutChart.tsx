@@ -12,6 +12,8 @@ export interface DonutSlice {
 
 interface DonutChartProps {
   slices: DonutSlice[];
+  /** Categories with net inflow, listed below the legend (not part of the ring). */
+  surplusSlices?: DonutSlice[];
   currency?: string;
   onSelectCategory?: (id: string) => void;
   label?: string;
@@ -21,7 +23,7 @@ interface DonutChartProps {
 }
 
 export const DonutChart: React.FC<DonutChartProps> = ({
-  slices, currency = '€', onSelectCategory, label = 'Ausgaben',
+  slices, surplusSlices = [], currency = '€', onSelectCategory, label = 'Ausgaben',
   emptyMessage = 'Keine Ausgaben in diesem Zeitraum', showLegend = true, selectedCategoryId,
 }) => {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -138,7 +140,7 @@ export const DonutChart: React.FC<DonutChartProps> = ({
 
       {/* Legend */}
       {showLegend && <div className="w-full max-w-sm space-y-2">
-        {slices.slice(0, 6).map((slice) => {
+        {slices.map((slice) => {
           const pct = Math.round((slice.value / total) * 100);
           return (
             <button
@@ -168,6 +170,19 @@ export const DonutChart: React.FC<DonutChartProps> = ({
             </button>
           );
         })}
+        {surplusSlices.map(slice => <button type="button" key={`surplus-${slice.id}`} disabled={!onSelectCategory}
+          onClick={() => onSelectCategory?.(slice.id)}
+          className="w-full min-h-[48px] text-left flex items-center justify-between gap-2 p-2 rounded-xl text-ios-gray hover:bg-slate-50 dark:hover:bg-neutral-800/50">
+          <span className="flex items-center gap-2.5 min-w-0">
+            <span className="w-3 h-3 rounded-full flex-shrink-0 border border-current" />
+            <span className="text-sm font-medium truncate flex items-center gap-1.5">
+              {slice.icon && <CategoryIcon name={slice.icon} className="w-4 h-4 flex-shrink-0" />}
+              <span>{slice.label}</span>
+            </span>
+          </span>
+          <span className="text-sm text-right flex-shrink-0"><span className="text-xs">Überschuss </span>
+            <span className="font-semibold">+{slice.value.toLocaleString('de-DE', { minimumFractionDigits: 2 })} {currency}</span></span>
+        </button>)}
       </div>}
     </div>
   );

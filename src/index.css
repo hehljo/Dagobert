@@ -5,6 +5,9 @@
 :root { color-scheme: light; }
 :root.dark { color-scheme: dark; }
 
+html, body { background-color: #eef3f9; }
+html.dark, html.dark body { background-color: #080a0f; }
+
 @layer utilities {
   .pt-safe {
     padding-top: env(safe-area-inset-top, 0px);
@@ -49,3 +52,7 @@ html, body, #root {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Safari date inputs must shrink inside narrow settings grids. */
+.settings-section input[type="date"] { min-inline-size: 0; inline-size: 100%; max-inline-size: 100%; display: block; appearance: none; font-size: 16px; }
+.settings-section input[type="date"]::-webkit-date-and-time-value { min-width: 0; text-align: left; }
