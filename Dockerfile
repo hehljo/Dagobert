@@ -2,7 +2,8 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN apk add --no-cache python3 make g++ && npm ci
+# postinstall (scripts/spm-fork.mjs) pflegt nur die iOS-SPM-Manifeste, die hier fehlen: Skripte aus, native Module gezielt bauen.
+RUN apk add --no-cache python3 make g++ && npm ci --ignore-scripts && npm rebuild better-sqlite3 esbuild
 COPY . .
 RUN npm run build
 
@@ -11,11 +12,12 @@ FROM node:22-alpine
 WORKDIR /app
 
 COPY package*.json ./
-RUN apk add --no-cache python3 make g++ &&     npm ci --omit=dev &&     apk del python3 make g++
+RUN apk add --no-cache python3 make g++ &&     npm ci --omit=dev --ignore-scripts &&     npm rebuild better-sqlite3 &&     apk del python3 make g++
 
 COPY --from=builder /app/dist ./dist
 COPY server ./server
-COPY src/lib/standardRules.json ./src/lib/standardRules.json
+# Der Server importiert geteilte TypeScript-Module (Backupformat, Identität, Import) direkt; Node 22 entfernt die Typen.
+COPY src ./src
 
 ENV NODE_ENV=production
 ENV PORT=5052
