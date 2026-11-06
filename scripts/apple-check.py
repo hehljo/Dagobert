@@ -34,11 +34,19 @@ DETAIL_STAGES = {'iphone-uitests', 'ipad-uitests', 'iphone-create', 'ipad-create
                  'ipad-bootstatus', 'archive', 'export', 'ota', 'app-store-upload', 'simulator-build', 'provision-profile'}
 
 
+REMOTE_RC = '__DAGOBERT_REMOTE_RC='
+
+
 def remote(command, content=None, timeout=60):
-    output = subprocess.run([*SSH, command], input=content, capture_output=True, text=True, timeout=timeout)
-    if output.returncode:
-        raise RuntimeError(output.stderr.strip() or output.stdout.strip())
-    return output.stdout
+    # Tailscale SSH on macOS reports exit-status 0 for every command (belegt 06.11.2026:
+    # `ssh mac 'exit 5'` -> 0), so the remote status travels as the last stdout line.
+    wrapped = command + '; printf "\\n%s%%s\\n" "$?"' % REMOTE_RC
+    output = subprocess.run([*SSH, wrapped], input=content, capture_output=True, text=True, timeout=timeout)
+    stdout, marker, status = output.stdout.rpartition('\n' + REMOTE_RC)
+    if not marker or output.returncode or status.strip() != '0':
+        detail = output.stderr.strip() or stdout.strip() or 'remote status missing'
+        raise RuntimeError('remote failed (status %s): %s' % (status.strip() or output.returncode, detail[-2000:]))
+    return stdout
 
 
 def source_files():
@@ -137,7 +145,8 @@ manifest=json.loads((base/'source-manifest.json').read_text())
 for name,digest in manifest['files'].items(): assert hashlib.sha256((source/name).read_bytes()).hexdigest()==digest,name
 checkout=Path('/Volumes/Dev/Work/GitHub/Dagobert')
 status=subprocess.check_output(['git','status','--short'],cwd=checkout,text=True)
-settings=(checkout/'ios/App/App.xcodeproj/project.pbxproj').read_text()
+# Team comes from the verified snapshot, never from local edits in the Mac checkout (a GitHub-Desktop pull stashed them).
+settings=(source/'ios/App/App.xcodeproj/project.pbxproj').read_text()
 import re
 teams=set(re.findall(r'DEVELOPMENT_TEAM = ([A-Z0-9]+);',settings));assert len(teams)==1
 team=teams.pop()
@@ -172,6 +181,16 @@ return jobTTY
 end tell
 ''' % (json.dumps('/bin/bash ' + shlex.quote(target + '/run.command')), json.dumps('Dagobert-' + name))
     tty = remote('osascript -', apple).strip()
+    started = '''from pathlib import Path
+import time
+p=Path(%r)
+for _ in range(60):
+    if (p/'detached-worker.pid').exists(): break
+    time.sleep(1)
+else:
+    raise SystemExit('worker did not start: detached-worker.pid missing after 60 s')
+''' % target
+    remote('python3 -', started, timeout=90)
     plan['terminal_tty'] = tty
     (local / 'plan.json').write_text(json.dumps(plan, indent=2) + '\n')
     print('APPLE_RUN ' + str(local), flush=True)

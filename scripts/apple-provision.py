@@ -151,11 +151,50 @@ def main():
         require(args.apply, 'App Store upload requires the explicit apply flag')
         archive = base / 'Dagobert.xcarchive'
         require(archive.is_dir(), 'Verified archive required before the App Store upload')
+        # Automatic export signing needs cloud-managed distribution certificates, which this API key may not use
+        # (belegt 06.11.2026: "Cloud signing permission error"). Sign manually with the existing local Distribution
+        # certificate and an App Store profile, exactly like the private Ad-Hoc path; the API key only uploads.
+        bundles = api('/v1/bundleIds?' + urllib.parse.urlencode({'filter[identifier]': args.bundle}))['data']
+        require(len(bundles) == 1 and bundles[0]['attributes']['identifier'] == args.bundle and
+                bundles[0]['attributes']['seedId'] == args.team, 'Existing App ID/team mismatch; no registration performed')
+        name = args.bundle + ' App Store'
+        profiles = [row for row in api('/v1/profiles?' + urllib.parse.urlencode({'filter[name]': name}))['data']
+                    if row['attributes']['profileState'] == 'ACTIVE']
+        require(len(profiles) <= 1, 'Ambiguous Dagobert App Store profile name')
+        if not profiles:
+            profiles = [api('/v1/profiles', {'data': {'type': 'profiles',
+                'attributes': {'name': name, 'profileType': 'IOS_APP_STORE'},
+                'relationships': {'bundleId': {'data': {'type': 'bundleIds', 'id': bundles[0]['id']}},
+                    'certificates': {'data': [{'type': 'certificates', 'id': certificate['id']}]}}}})['data']]
+        profile = profiles[0]['attributes']
+        require(profile['profileType'] == 'IOS_APP_STORE', 'App Store profile has the wrong type')
+        content = base64.b64decode(profile['profileContent'])
+        downloaded = base / ('profile-' + profile['uuid'] + '.mobileprovision')
+        downloaded.write_bytes(content)
+        decoded = subprocess.run(['security', 'cms', '-D', '-i', str(downloaded)], capture_output=True, check=True, timeout=30)
+        document = plistlib.loads(decoded.stdout)
+        entitlements = document['Entitlements']
+        require(document['TeamIdentifier'] == [args.team] and 'ProvisionedDevices' not in document, 'App Store profile team/device mismatch')
+        require(entitlements['application-identifier'] == args.team + '.' + args.bundle and entitlements.get('get-task-allow') is False,
+                'App Store profile identity/debug permission mismatch')
+        require(document['ExpirationDate'] > datetime.datetime.utcnow(), 'App Store profile expired')
+        require(fingerprint in [hashlib.sha1(value).hexdigest().upper() for value in document['DeveloperCertificates']],
+                'App Store profile does not cover the existing certificate')
+        require(capabilities_cover_app(entitlements), 'Existing CloudKit/Push capabilities are missing; no capability changes performed')
+        parent = Path.home() / 'Library/Developer/Xcode/UserData/Provisioning Profiles'
+        require(parent.resolve().is_relative_to(Path('/Volumes/Dev')), 'Xcode profile storage must be external')
+        parent.mkdir(parents=True, exist_ok=True)
+        installed = parent / (profile['uuid'] + '.mobileprovision')
+        if installed.exists():
+            require(installed.read_bytes() == content, 'Installed App Store profile differs; no overwrite')
+        else:
+            installed.write_bytes(content)
         options = base / 'AppStoreExportOptions.plist'
-        options.write_bytes(plistlib.dumps({'method': 'app-store-connect', 'destination': 'upload', 'signingStyle': 'automatic',
-            'teamID': args.team, 'uploadSymbols': True, 'manageAppVersionAndBuildNumber': False}))
+        options.write_bytes(plistlib.dumps({'method': 'app-store-connect', 'destination': 'upload', 'signingStyle': 'manual',
+            'teamID': args.team, 'signingCertificate': fingerprint, 'provisioningProfiles': {args.bundle: profile['uuid']},
+            'uploadSymbols': True, 'manageAppVersionAndBuildNumber': False}))
         command = ['xcodebuild', '-exportArchive', '-archivePath', str(archive), '-exportPath', str(base / 'app-store-export'),
-                   '-exportOptionsPlist', str(options), '-allowProvisioningUpdates', '-authenticationKeyPath', str(key),
+                   '-exportOptionsPlist', str(options), '-authenticationKeyPath', str(key),
                    '-authenticationKeyID', config['key_id'], '-authenticationKeyIssuerID', config['issuer_id']]
         completed = subprocess.run(command, cwd=base, capture_output=True, text=True, timeout=1700)
         output = completed.stdout + completed.stderr
