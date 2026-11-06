@@ -132,13 +132,20 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         cover.backgroundColor = .systemBackground
         cover.accessibilityViewIsModal = true
         cover.accessibilityIdentifier = "app-privacy-shield"
+        // Name aus dem Info.plist (eine Quelle), Logo aus dem gebündelten Web-Build.
+        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "Dagobert"
         let title = UILabel()
-        title.text = "Dagobert"
+        title.text = appName
         title.font = .preferredFont(forTextStyle: .largeTitle)
         title.adjustsFontForContentSizeCategory = true
         title.textAlignment = .center
+        title.accessibilityTraits = .header
+        let logo = UIImageView(image: Bundle.main.path(forResource: "icon-512", ofType: "png", inDirectory: "public").flatMap(UIImage.init(contentsOfFile:)))
+        logo.contentMode = .scaleAspectFit
+        logo.isAccessibilityElement = false
+        logo.isHidden = logo.image == nil
         let button = UIButton(type: .system)
-        button.setTitle("Dagobert entsperren", for: .normal)
+        button.setTitle("\(appName) entsperren", for: .normal)
         button.titleLabel?.font = .preferredFont(forTextStyle: .headline)
         button.titleLabel?.adjustsFontForContentSizeCategory = true
         button.addTarget(self, action: #selector(unlock), for: .touchUpInside)
@@ -150,10 +157,21 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         status.textAlignment = .center
         status.accessibilityIdentifier = "app-lock-status"
         lockStatus = status
-        let stack = UIStackView(arrangedSubviews: [title, status, button])
+        // Logo und Name oben, damit sie über dem Face-ID-Dialog in der Bildmitte sichtbar bleiben.
+        let header = UIStackView(arrangedSubviews: [logo, title])
+        header.axis = .vertical; header.alignment = .center; header.spacing = 12; header.translatesAutoresizingMaskIntoConstraints = false
+        cover.addSubview(header)
+        let stack = UIStackView(arrangedSubviews: [status, button])
         stack.axis = .vertical; stack.spacing = 24; stack.translatesAutoresizingMaskIntoConstraints = false
         cover.addSubview(stack)
-        NSLayoutConstraint.activate([stack.centerXAnchor.constraint(equalTo: cover.centerXAnchor), stack.centerYAnchor.constraint(equalTo: cover.centerYAnchor),
+        NSLayoutConstraint.activate([header.topAnchor.constraint(equalTo: cover.safeAreaLayoutGuide.topAnchor, constant: 48),
+            header.centerXAnchor.constraint(equalTo: cover.centerXAnchor),
+            header.leadingAnchor.constraint(greaterThanOrEqualTo: cover.safeAreaLayoutGuide.leadingAnchor, constant: 24),
+            header.trailingAnchor.constraint(lessThanOrEqualTo: cover.safeAreaLayoutGuide.trailingAnchor, constant: -24),
+            logo.widthAnchor.constraint(equalToConstant: 96), logo.heightAnchor.constraint(equalToConstant: 96),
+            stack.topAnchor.constraint(greaterThanOrEqualTo: header.bottomAnchor, constant: 32),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: cover.safeAreaLayoutGuide.bottomAnchor, constant: -24),
+            stack.centerXAnchor.constraint(equalTo: cover.centerXAnchor), { let c = stack.centerYAnchor.constraint(equalTo: cover.centerYAnchor, constant: 80); c.priority = .defaultHigh; return c }(),
             stack.leadingAnchor.constraint(greaterThanOrEqualTo: cover.safeAreaLayoutGuide.leadingAnchor, constant: 24),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: cover.safeAreaLayoutGuide.trailingAnchor, constant: -24), button.heightAnchor.constraint(greaterThanOrEqualToConstant: 48)])
         window.addSubview(cover); shield = cover
