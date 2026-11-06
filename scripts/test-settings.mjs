@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { APP_LOCKED_EVENT, APP_UNLOCKED_EVENT } from '../src/platform/appAccess.ts';
 import { testSalaryBudget } from './test-salary-budget.mjs';
+import { BRAND } from '../src/brand.ts';
 
 export async function testSettings({ api, newContext, record, url }) {
   await testSalaryBudget({ api, newContext, record, url });
@@ -15,6 +16,15 @@ export async function testSettings({ api, newContext, record, url }) {
   await page.getByRole('button', { name: 'Einstellungen', exact: true }).click();
   const section = id => page.locator(`[data-settings-section="${id}"]`);
   await section('account').waitFor();
+  const layout = await page.evaluate(() => ({
+    groups: [...document.querySelectorAll('[data-settings-group]')].map(group => [group.dataset.settingsGroup,
+      [...group.querySelectorAll('[data-settings-section]')].map(section => section.dataset.settingsSection)]),
+    open: [...document.querySelectorAll('[data-settings-section][open]')].map(section => section.dataset.settingsSection) }));
+  assert.deepEqual(layout.groups, [['Daten', ['backup']], ['Konto & Auswertung', ['account', 'salary-budget', 'categories']],
+    ['Sicherheit & Darstellung', ['security', 'profile-pin', 'appearance']], ['Info', ['about']]]);
+  assert.deepEqual(layout.open, []);
+  record('settings_grouped_and_collapsed', 'Einstellungen in vier Gruppen nach Wichtigkeit, beim ersten Öffnen alle Bereiche zu');
+  await section('account').locator('summary').click();
   for (const width of [320, 390, 768]) {
     await page.setViewportSize({ width, height: 844 });
     const bounds = await section('account').evaluate(el => ({ section: el.getBoundingClientRect().toJSON(),
@@ -34,6 +44,32 @@ export async function testSettings({ api, newContext, record, url }) {
   record('settings_collapse_persists', 'Einstellungen merken offenen und geschlossenen Zustand');
   assert.equal(await section('icloud').count(), 0);
   record('web_hides_native_settings', 'Web zeigt keine iCloud-Optionen');
+  await section('about').locator('summary').click();
+  const aboutLinks = await section('about').locator('a[data-testid^="about-"]').evaluateAll(links => links.map(a => ({
+    id: a.dataset.testid, href: a.getAttribute('href'), target: a.target, height: a.getBoundingClientRect().height })));
+  const expectedLinks = { 'about-support': `mailto:${BRAND.supportEmail}`, 'about-privacy': BRAND.privacyUrl, 'about-imprint': BRAND.imprintUrl, 'about-source': BRAND.sourceUrl };
+  assert.deepEqual(aboutLinks.map(link => link.id).sort(), Object.keys(expectedLinks).sort());
+  for (const link of aboutLinks) {
+    assert.ok(link.href.startsWith(expectedLinks[link.id]), `${link.id}: ${link.href}`);
+    assert.equal(link.target, '_blank'); assert.ok(link.height >= 44, `${link.id} Trefferfläche ${link.height}px`);
+  }
+  record('settings_about_support_and_legal_links', 'Über-Bereich verlinkt Support-Mail, Datenschutz, Impressum und Quellcode aus der Markenquelle');
+  const demoProfile = await (await api('/api/profiles', 'POST', { name: 'UI Demo Test' })).json();
+  const demoContext = await newContext({ viewport: { width: 390, height: 844 } });
+  await demoContext.addInitScript(id => { if (location.protocol === 'http:' || location.protocol === 'https:') localStorage.setItem('dagobert_active_profile_id', id); }, demoProfile.id);
+  const demo = await demoContext.newPage(); demo.on('dialog', dialog => dialog.accept()); await demo.goto(url);
+  await demo.getByRole('button', { name: 'Einstellungen', exact: true }).click();
+  await demo.locator('[data-settings-section="backup"] > summary').click();
+  await demo.getByRole('button', { name: 'Demo-Daten laden', exact: true }).click();
+  await demo.getByRole('button', { name: 'Dashboard', exact: true }).click();
+  const demoKpi = label => demo.locator('.glass-kpi').filter({ has: demo.getByText(label, { exact: true }) }).locator('.glass-kpi-value');
+  await demoKpi('Cashflow (Monat)').filter({ hasNotText: /^\s*[-+]?0,00/ }).waitFor({ timeout: 15000 });
+  const demoData = await (await api(`/api/data?profileId=${encodeURIComponent(demoProfile.id)}`)).json();
+  const demoMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  assert.ok(demoData.transactions.length > 20, `Demo-Buchungen: ${demoData.transactions.length}`);
+  assert.ok(demoData.transactions.some(t => t.date.startsWith(demoMonth)), 'Demo-Daten enthalten den laufenden Monat');
+  await demoContext.close();
+  record('settings_demo_data_current_month', 'Demo-Daten füllen den laufenden Monat: Monatsergebnis in der Übersicht nicht 0');
   await page.getByTitle('Profil wechseln').click();
   await page.getByRole('button', { name: 'Profil UI Settings Test umbenennen', exact: true }).click();
   await page.getByLabel('Profil umbenennen', { exact: true }).fill('Mein Haushalt');

@@ -23,3 +23,11 @@ export function SettingsSection({ id, title, profileId, children, defaultOpen = 
     <div className="min-w-0 pt-3 space-y-4">{children}</div>
   </details>;
 }
+
+/** Überschrift über zusammengehörigen Bereichen, nach Wichtigkeit geordnet. */
+export function SettingsGroup({ title, children }: { title: string; children: ReactNode }) {
+  return <section data-settings-group={title} aria-label={title} className="min-w-0 space-y-3">
+    <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-ios-gray">{title}</h2>
+    {children}
+  </section>;
+}
