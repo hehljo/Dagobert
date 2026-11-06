@@ -35,6 +35,15 @@ final class OfflineAppTests: XCTestCase {
                 }
             }
             if manualAction.exists && manualAction.isEnabled && manualAction.isHittable { return }
+            // Nach einer abgebrochenen Abfrage (belegt iPad Pro 13″, 06.11.2026) neu anstoßen statt nur Ereignisse zu senden.
+            // Nur wenn der Sperrbildschirm den Abbruch meldet; isHittable wirft während Übergängen („Activation point invalid“).
+            let lockStatus = app.staticTexts["app-lock-status"]
+            let unlockButton = app.buttons["Dagobert entsperren"]
+            if !app.alerts.firstMatch.exists && !system.alerts.firstMatch.exists && lockStatus.exists
+                && lockStatus.label.contains("abgebrochen") && unlockButton.exists {
+                unlockButton.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            }
             biometricEvent(matching: true)
             RunLoop.current.run(until: Date().addingTimeInterval(0.25))
         }
@@ -59,10 +68,49 @@ final class OfflineAppTests: XCTestCase {
         XCTAssertTrue(button.isHittable)
         button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
+    // Store-Screenshots: nur über apple-check.py --store-screenshots (-only-testing), im normalen Lauf übersprungen.
+    func testStoreScreenshots() {
+        tapButton("Einstellungen")
+        // Der Bereichskopf (<summary>) kann je nach WebKit als Text, Knopf oder Aufklapper erscheinen: über das Label suchen.
+        let labeled = { (label: String) in self.app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch }
+        let backup = labeled("Daten & Backup")
+        guard backup.waitForExistence(timeout: 20) else {
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "store-settings-accessibility"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+            capture("store-settings-missing-backup")
+            return XCTFail("Bereich „Daten & Backup“ nicht gefunden")
+        }
+        backup.tap()
+        let demo = labeled("Demo-Daten laden")
+        XCTAssertTrue(demo.waitForExistence(timeout: 10), "Knopf „Demo-Daten laden“ fehlt")
+        demo.tap()
+        for _ in 0..<2 {
+            let ok = app.alerts.firstMatch.buttons["Ok"]
+            XCTAssertTrue(ok.waitForExistence(timeout: 10), "Demo-Daten-Dialog fehlt")
+            ok.tap()
+        }
+        backup.tap()
+        tapButton("Dashboard")
+        XCTAssertTrue(manualAction.waitForExistence(timeout: 10))
+        // Vormonat ist voll belegt; der laufende Monat hat je nach Tag erst wenige Buchungen.
+        tapButton("Vorheriger Monat")
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+        capture("store-01-dashboard")
+        tapButton("Buchungen")
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+        capture("store-02-transactions")
+        tapButton("Statistik")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Monatlicher Verlauf")).firstMatch.waitForExistence(timeout: 10))
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+        capture("store-03-statistics")
+        tapButton("Einstellungen")
+        RunLoop.current.run(until: Date().addingTimeInterval(1.0))
+        capture("store-04-settings")
+    }
     func testNativeOfflineNavigation() {
         XCTAssertTrue(app.webViews.firstMatch.exists)
         tapButton("Einstellungen")
-        XCTAssertTrue(app.staticTexts["Lokal gespeichert, iCloud optional"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Konto & Startsaldo"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Sicherheit & App-Sperre"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Face ID, Touch ID oder Gerätecode"].exists)
         XCTAssertFalse(app.buttons["Profil-PIN einrichten"].exists)

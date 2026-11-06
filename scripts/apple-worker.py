@@ -26,6 +26,8 @@ parser.add_argument('--build-number')
 parser.add_argument('--resume', action='store_true')
 parser.add_argument('--allow-provisioning-updates', action='store_true')
 parser.add_argument('--provision-helper', type=Path)
+parser.add_argument('--app-store', action='store_true')
+parser.add_argument('--store-screenshots', action='store_true')
 args = parser.parse_args()
 os.umask(0o077)
 BASE = args.directory.resolve()
@@ -159,7 +161,7 @@ def simulator_check(device_type, runtime, label, xcode):
         bundle = BASE / (label + '.xcresult')
         run([*xcode, 'test-without-building', '-configuration', 'Debug', '-destination', 'platform=iOS Simulator,id=' + identifier,
              '-parallel-testing-enabled', 'NO', '-maximum-concurrent-test-simulator-destinations', '1',
-             '-resultBundlePath', bundle, 'CODE_SIGNING_ALLOWED=YES', 'CODE_SIGN_IDENTITY=-',
+             '-skip-testing:DagobertUITests/OfflineAppTests/testStoreScreenshots', '-resultBundlePath', bundle, 'CODE_SIGNING_ALLOWED=YES', 'CODE_SIGN_IDENTITY=-',
              'DEVELOPMENT_TEAM=' + args.team], label + '-uitests', 600)
         summary = json_run(['xcrun', 'xcresulttool', 'get', 'test-results', 'summary', '--path', bundle], label + '-summary')
         require(summary.get('passedTests') == 3 and summary.get('failedTests') == 0 and summary.get('skippedTests') == 0,
@@ -189,6 +191,68 @@ def simulator_check(device_type, runtime, label, xcode):
         result['simulators'][-1]['shutdown'] = code == 0
         if code and not primary_error:
             raise RuntimeError('Own simulator failed to shut down')
+
+
+def store_upload():
+    # App-Store-Fassung: Archiv wie beim privaten Build, Export mit automatischer Signierung direkt nach App Store Connect.
+    require(keychain_unlocked(), 'Login keychain locked; native unlock required')
+    archive = BASE / 'Dagobert.xcarchive'
+    helper = args.provision_helper or SOURCE / 'scripts/apple-provision.py'
+    require(helper.is_file(), 'Existing-account provisioning helper is required')
+    devices = json_run([CLI, 'devices', '--json'], 'roamrun-devices')
+    matches = [d for d in devices if d.get('name') == args.device]
+    require(len(matches) == 1 and matches[0].get('udid'), 'One confirmed RoamRun device required')
+    command = [sys.executable, helper, '--directory', BASE, '--team', args.team, '--bundle', APP_ID,
+               '--udid', matches[0]['udid'], '--apply']
+    if args.build_number:
+        command.extend(['--build-number', args.build_number])
+    run([*command, '--app-store-preflight'], 'app-store-preflight', 120)
+    run([*command, '--archive'], 'archive', 960)
+    properties = plistlib.loads((archive / 'Info.plist').read_bytes())['ApplicationProperties']
+    require(properties['CFBundleIdentifier'] == APP_ID, 'Unexpected application identity in archive')
+    if args.build_number:
+        require(str(properties['CFBundleVersion']) == args.build_number, 'Archive did not use the requested build number')
+    run([*command, '--app-store-upload'], 'app-store-upload', 1800)
+    result.update(bundle_id=properties['CFBundleIdentifier'], version=properties['CFBundleShortVersionString'],
+                  build=str(properties['CFBundleVersion']), app_store=True)
+    result['checks']['app_store_uploaded'] = True
+
+
+STORE_SHOTS = ['store-01-dashboard', 'store-02-transactions', 'store-03-statistics', 'store-04-settings']
+
+
+def store_capture(device_type, runtime, label, xcode, size):
+    # App-Store-Rohbilder mit Demo-Daten; eigener Simulator, feste Statusleiste, nur der Screenshot-Test.
+    _, output = run(['xcrun', 'simctl', 'create', 'Dagobert-' + BASE.name + '-store-' + label, device_type, runtime], label + '-store-create')
+    identifier = output.strip()
+    require(re.fullmatch(r'[A-F0-9-]{36}', identifier), 'Unexpected simulator identifier')
+    result['simulators'].append({'id': identifier, 'label': 'store-' + label, 'shutdown': False})
+    try:
+        run(['xcrun', 'simctl', 'boot', identifier], label + '-store-boot')
+        _, boot = run(['xcrun', 'simctl', 'bootstatus', identifier, '-b'], label + '-store-bootstatus', 180)
+        require('Finished' in boot, 'Simulator boot not positively verified')
+        run(['xcrun', 'simctl', 'status_bar', identifier, 'override', '--time', '9:41', '--dataNetwork', 'wifi', '--wifiMode', 'active',
+             '--wifiBars', '3', '--cellularMode', 'active', '--cellularBars', '4', '--batteryState', 'charged', '--batteryLevel', '100'],
+            label + '-store-statusbar')
+        bundle = BASE / ('store-' + label + '.xcresult')
+        run([*xcode, 'test-without-building', '-configuration', 'Debug', '-destination', 'platform=iOS Simulator,id=' + identifier,
+             '-only-testing:DagobertUITests/OfflineAppTests/testStoreScreenshots', '-resultBundlePath', bundle,
+             'CODE_SIGNING_ALLOWED=YES', 'CODE_SIGN_IDENTITY=-', 'DEVELOPMENT_TEAM=' + args.team], label + '-store-uitests', 600)
+        summary = json_run(['xcrun', 'xcresulttool', 'get', 'test-results', 'summary', '--path', bundle], label + '-store-summary')
+        require(summary.get('passedTests') == 1 and summary.get('failedTests') == 0, 'Store screenshot test did not pass')
+        attachments = BASE / ('store-' + label + '-attachments')
+        run(['xcrun', 'xcresulttool', 'export', 'attachments', '--path', bundle, '--output-path', attachments], label + '-store-attachments')
+        manifest = json.loads((attachments / 'manifest.json').read_text())
+        found = {a['suggestedHumanReadableName'].split('_')[0]: a['exportedFileName'] for t in manifest for a in t.get('attachments', [])}
+        for name in STORE_SHOTS:
+            require(name in found, 'Missing store screenshot ' + name)
+            png = (attachments / found[name]).read_bytes()
+            width, height = int.from_bytes(png[16:20], 'big'), int.from_bytes(png[20:24], 'big')
+            require((width, height) == size, 'Unexpected %s size %sx%s' % (name, width, height))
+        result['checks']['store_screenshots_' + label] = True
+    finally:
+        code, _ = run(['xcrun', 'simctl', 'shutdown', identifier], label + '-store-shutdown', 60, check=False)
+        result['simulators'][-1]['shutdown'] = code == 0
 
 
 def publish(xcode):
@@ -303,13 +367,28 @@ try:
     require(len(pin) == 1 and pin[0]['location'] == 'https://github.com/hehljo/capacitor-swift-pm.git'
             and pin[0]['state']['version'] == '8.6.0' and pin[0]['state'].get('revision'), 'Unexpected dependency resolution')
     result['resolved_packages'] = resolved
+    if args.store_screenshots:
+        run([*xcode, 'build-for-testing', '-configuration', 'Debug', '-destination', 'generic/platform=iOS Simulator',
+             'CODE_SIGNING_ALLOWED=YES', 'CODE_SIGN_IDENTITY=-', 'DEVELOPMENT_TEAM=' + args.team], 'simulator-build', 900)
+        runtimes = json_run(['xcrun', 'simctl', 'list', 'runtimes', '--json'], 'runtimes')['runtimes']
+        runtime_info = next(r for r in reversed(runtimes) if r.get('isAvailable') and '.iOS-' in r['identifier'])
+        supported = runtime_info.get('supportedDeviceTypes', [])
+        phone = [d['identifier'] for d in supported if d.get('name') == 'iPhone 17 Pro Max']
+        tablet = [d['identifier'] for d in supported if d.get('productFamily') == 'iPad' and 'Pro' in d['name'] and '13-inch' in d['name']]
+        require(phone and tablet, 'Store screenshot simulators (iPhone 17 Pro Max, iPad Pro 13-inch) not available')
+        store_capture(phone[0], runtime_info['identifier'], 'iphone', xcode, (1320, 2868))
+        store_capture(tablet[-1], runtime_info['identifier'], 'ipad', xcode, (2064, 2752))
+        verify_sources()
+        result['checks']['source_snapshot_unchanged'] = True
+        save('passed', failures=0)
+        sys.exit(0)
     if args.manual_tests:
         require(args.publish, 'Manual-test mode is only for an authorized private build/export')
         result['scope'] = 'Private build/export; native UI and real-device acceptance remain with the user'
         result['manual_tests_pending'] = True
         verify_sources()
         result['checks']['source_snapshot_unchanged'] = True
-        publish(xcode)
+        store_upload() if args.app_store else publish(xcode)
         save('passed', failures=0)
         sys.exit(0)
     if args.resume:

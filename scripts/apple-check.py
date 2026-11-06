@@ -31,7 +31,7 @@ SSH = ['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'C
 SCP = ['scp', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=12',
        '-o', 'UserKnownHostsFile=' + PROFILE['known_hosts']]
 DETAIL_STAGES = {'iphone-uitests', 'ipad-uitests', 'iphone-create', 'ipad-create', 'iphone-bootstatus',
-                 'ipad-bootstatus', 'archive', 'export', 'ota', 'simulator-build', 'provision-profile'}
+                 'ipad-bootstatus', 'archive', 'export', 'ota', 'app-store-upload', 'simulator-build', 'provision-profile'}
 
 
 def remote(command, content=None, timeout=60):
@@ -56,7 +56,7 @@ def source_files():
     return sorted(set(paths))
 
 
-def start(publish, prepared=False, manual_tests=False):
+def start(publish, prepared=False, manual_tests=False, app_store=False, store_screenshots=False):
     from ruttla.contracts import ContractError, named_proof, validate_receipt
     name = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ-') + uuid.uuid4().hex[:8]
     local = ROOT / '.ruttla-evidence/apple' / name
@@ -109,7 +109,7 @@ def start(publish, prepared=False, manual_tests=False):
         for path in files:
             bundle.add(path, arcname=str(path.relative_to(ROOT)), recursive=False)
         bundle.add(vectors, arcname='tests/portable/identity-vectors.json')
-    plan = {'remote': target, 'local': str(local), 'publish_requested': publish, 'manual_tests': manual_tests, 'created': name, 'detached': True,
+    plan = {'remote': target, 'local': str(local), 'publish_requested': publish, 'manual_tests': manual_tests, 'app_store': app_store, 'store_screenshots': store_screenshots, 'created': name, 'detached': True,
             'build_number': manifest['build_number'], 'local_proof_status': proof_status,
             'archive_sha256': hashlib.sha256(archive.read_bytes()).hexdigest()}
     (local / 'plan.json').write_text(json.dumps(plan, indent=2) + '\n')
@@ -147,13 +147,15 @@ argv=['/usr/bin/python3',str(source/'scripts/apple-worker.py'),str(base),'--team
 argv.extend(['--build-number',manifest['build_number']])
 if %s: argv.append('--publish')
 if %s: argv.append('--manual-tests')
+if %s: argv.append('--app-store')
+if %s: argv.append('--store-screenshots')
 job=chr(10).join(['#!/bin/bash','export TMPDIR='+shlex.quote(str(base/'tmp')+'/'),shlex.join(argv)+' > '+shlex.quote(str(base/'worker.log'))+' 2>&1','worker_exit=$?','echo "$worker_exit" > '+shlex.quote(str(base/'worker.exit')),'exit "$worker_exit"',''])
 (base/'job.command').write_text(job)
 command=chr(10).join(['#!/bin/bash','nohup /bin/bash '+shlex.quote(str(base/'job.command'))+' </dev/null >'+shlex.quote(str(base/'task-shell.log'))+' 2>&1 &','job_pid=$!','echo "$job_pid" > '+shlex.quote(str(base/'detached-worker.pid')),'/usr/bin/caffeinate -i -w "$job_pid" </dev/null >'+shlex.quote(str(base/'caffeinate.log'))+' 2>&1 &','echo "$!" > '+shlex.quote(str(base/'caffeinate.pid')),''])
 (base/'run.command').write_text(command)
 (base/'run.command').chmod(0o700)
 print(json.dumps({'files':len(manifest['files']),'team':team,'external':str(base)}))
-''' % (repr(target), repr(plan['archive_sha256']), repr(publish), repr(manual_tests))
+''' % (repr(target), repr(plan['archive_sha256']), repr(publish), repr(manual_tests), repr(app_store), repr(store_screenshots))
     print(remote('python3 -', prepare), end='')
     return launch(local)
 
@@ -379,6 +381,11 @@ print(json.dumps(result))
             cleanup(local)
             for name in ['worker.log', 'source-manifest.json']:
                 subprocess.run([*SCP, PROFILE['host'] + ':' + plan['remote'] + '/' + name, str(local / name)], check=True)
+            if plan.get('store_screenshots') and report['worker_exit'] == 0:
+                for label in ['iphone', 'ipad']:
+                    subprocess.run([*SCP, '-r', PROFILE['host'] + ':' + plan['remote'] + '/store-' + label + '-attachments',
+                                    str(local / ('store-' + label))], check=True)
+                print('STORE_SCREENSHOTS ' + str(local), flush=True)
     return report
 
 
@@ -621,6 +628,8 @@ def main():
     parser.add_argument('--prepared', action='store_true', help='Skip local gates only when all source-bound receipts are current (cap:sync always runs)')
     parser.add_argument('--details', action='store_true', help='Show the current synthetic UI test log tail')
     parser.add_argument('--provision', action='store_true', help='Allow Xcode profile updates while resuming an authorized private export')
+    parser.add_argument('--store-screenshots', action='store_true', help='Capture App Store raw screenshots with demo data on iPhone 6.9" and iPad 13" simulators')
+    parser.add_argument('--app-store', action='store_true', help='Archive and upload the App Store build to App Store Connect instead of the private OTA build')
     args = parser.parse_args()
     if args.action not in ['run', 'platform-info'] and not args.directory:
         parser.error('--directory is required for status/cleanup')
@@ -631,7 +640,9 @@ def main():
             fcntl.flock(pipeline_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise RuntimeError('An Apple pipeline is already running')
-    local = start(args.publish, args.prepared, args.manual_tests) if args.action == 'run' else resume(args.directory, args.provision) if args.action == 'resume' else args.directory
+    if (args.app_store or args.store_screenshots) and args.action != 'run':
+        parser.error('--app-store/--store-screenshots only start a fresh run')
+    local = start(args.publish or args.app_store, args.prepared, args.manual_tests or args.app_store or args.store_screenshots, args.app_store, args.store_screenshots) if args.action == 'run' else resume(args.directory, args.provision) if args.action == 'resume' else args.directory
     if args.action == 'platform-info':
         platform_info()
     elif args.action == 'artifact-audit':

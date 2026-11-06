@@ -34,6 +34,8 @@ nie still umbenennen oder migrieren.
 | Gezielte Gate-Suite | `npm run gates -- --suite settings\|browser\|portable\|imports\|comdirect\|apple\|stale` |
 | iOS synchronisieren | `npm run cap:sync` (danach `scripts/spm-fork.mjs` per Hook) |
 | Privater iPhone-Build (Mac/RoamRun) | `python3 scripts/apple-check.py run --publish --manual-tests --wait` |
+| App-Store-Build hochladen (Mac, braucht ASC-App-Eintrag) | `python3 scripts/apple-check.py run --app-store --prepared --wait` |
+| Store-Rohscreenshots mit Demo-Daten (iPhone 6,9″, iPad 13″) | `python3 scripts/apple-check.py run --store-screenshots --prepared --wait` |
 
 `npm run gates` schreibt Nachweise nach `.ruttla-evidence/`. Danach
 `ruttla --changed-only --format agent` — nie parallel zu einem laufenden Gate.

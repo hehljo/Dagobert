@@ -49,6 +49,8 @@ def main():
     parser.add_argument('--apply', action='store_true')
     parser.add_argument('--archive', action='store_true', help='Archive with the existing Apple API key and Xcode automatic signing')
     parser.add_argument('--build-number')
+    parser.add_argument('--app-store-preflight', action='store_true', help='Only check that the App Store Connect app record exists')
+    parser.add_argument('--app-store-upload', action='store_true', help='Export the existing archive with automatic signing and upload it to App Store Connect')
     args = parser.parse_args()
     require(args.build_number is None or re.fullmatch(r'[1-9][0-9]{0,8}', args.build_number), 'Invalid build number')
     os.umask(0o077)
@@ -137,6 +139,31 @@ def main():
             output = output.replace(value, '<apple-auth-redacted>')
         print(output, flush=True)
         require(completed.returncode == 0, 'Xcode archive/signing failed')
+        return 0
+    if args.app_store_preflight or args.app_store_upload:
+        # Apples API legt keine Apps an: vor dem teuren Archiv prüfen, dass der Eintrag existiert.
+        apps = api('/v1/apps?' + urllib.parse.urlencode({'filter[bundleId]': args.bundle}))['data']
+        require(len(apps) == 1, 'App record for ' + args.bundle + ' missing in App Store Connect; create it there first (Apps -> New App)')
+        if args.app_store_preflight:
+            print(json.dumps({'app_store_preflight': 'passed', 'app_id': apps[0]['id']}), flush=True)
+            return 0
+    if args.app_store_upload:
+        require(args.apply, 'App Store upload requires the explicit apply flag')
+        archive = base / 'Dagobert.xcarchive'
+        require(archive.is_dir(), 'Verified archive required before the App Store upload')
+        options = base / 'AppStoreExportOptions.plist'
+        options.write_bytes(plistlib.dumps({'method': 'app-store-connect', 'destination': 'upload', 'signingStyle': 'automatic',
+            'teamID': args.team, 'uploadSymbols': True, 'manageAppVersionAndBuildNumber': False}))
+        command = ['xcodebuild', '-exportArchive', '-archivePath', str(archive), '-exportPath', str(base / 'app-store-export'),
+                   '-exportOptionsPlist', str(options), '-allowProvisioningUpdates', '-authenticationKeyPath', str(key),
+                   '-authenticationKeyID', config['key_id'], '-authenticationKeyIssuerID', config['issuer_id']]
+        completed = subprocess.run(command, cwd=base, capture_output=True, text=True, timeout=1700)
+        output = completed.stdout + completed.stderr
+        for value in [str(key), config['key_id'], config['issuer_id']]:
+            output = output.replace(value, '<apple-auth-redacted>')
+        print(output, flush=True)
+        require(completed.returncode == 0, 'App Store export/upload failed')
+        print(json.dumps({'app_store_upload': 'passed', 'app_id': apps[0]['id']}), flush=True)
         return 0
     bundles = api('/v1/bundleIds?' + urllib.parse.urlencode({'filter[identifier]': args.bundle}))['data']
     require(len(bundles) == 1 and bundles[0]['attributes']['identifier'] == args.bundle and
